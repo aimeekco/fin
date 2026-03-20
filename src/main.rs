@@ -22,7 +22,7 @@ enum Command {
         path: PathBuf,
         #[arg(long, default_value = "127.0.0.1")]
         host: String,
-        #[arg(long, default_value_t = 57110)]
+        #[arg(long, default_value_t = 57120)]
         port: u16,
         #[arg(long)]
         no_play: bool,
@@ -31,7 +31,7 @@ enum Command {
         path: PathBuf,
         #[arg(long, default_value = "127.0.0.1")]
         host: String,
-        #[arg(long, default_value_t = 57110)]
+        #[arg(long, default_value_t = 57120)]
         port: u16,
         #[arg(long)]
         no_play: bool,

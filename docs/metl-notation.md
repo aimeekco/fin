@@ -25,7 +25,7 @@ Current semantics:
 - `/4` produces beat positions `0, 1, 2, 3`
 - `/2` produces beat positions `0, 2`
 - if `bpm` is omitted, playback defaults to `120`
-- runtime playback currently maps `bd`, `sd`, and `hh` to custom SuperCollider drum synthdefs
+- runtime playback currently sends layer names directly to SuperDirt as sound names
 
 ## Layer Model
 
@@ -41,10 +41,10 @@ Today, a bare layer name is treated as an implicit self-triggering pattern sourc
 
 Runtime voice mapping today:
 
-- `bd` is a kick voice
-- `sd` is a snare voice
-- `hh` is a hi-hat voice
-- unknown symbols fall back to a simple tonal synth
+- `bd` plays the SuperDirt `bd` sound
+- `sd` plays the SuperDirt `sd` sound
+- `hh` plays the SuperDirt `hh` sound
+- unknown symbols are sent through unchanged so they can target other SuperDirt sounds
 
 ## Timing Operator
 

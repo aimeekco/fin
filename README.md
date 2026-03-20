@@ -8,9 +8,8 @@ This repo currently supports:
 
 - parsing a small `.metl` subset
 - printing one-bar schedules
-- sending OSC trigger messages to SuperCollider
-- triggering custom drum synthdefs in SuperCollider
-- releasing notes cleanly after each hit
+- sending OSC trigger messages to SuperDirt
+- using SuperDirt's sample library for drum playback
 - continuous bar-by-bar playback with bar-boundary reloads
 
 Implemented METL subset:
@@ -24,16 +23,21 @@ Implemented METL subset:
 
 - Booting SuperCollider through `s.boot;` is the simplest reliable setup for local development.
 - The repo binary and an older globally installed `fin` can diverge. `cargo run -- ...` is the safest way to verify the latest local code.
-- Silent OSC failure is hard to debug. `fin` now sends `/status` and requires `/status.reply` before playback.
-- Reusing fixed node IDs causes repeat-run failures in SuperCollider. The runtime now uses unique node IDs per process.
-- Triggering `default` with `/s_new` is not enough by itself. Notes must also be released, so the runtime sends `/n_set gate 0` after each hit.
-- Pitching the stock `default` synth does not sound like drums. `bd`, `sd`, and `hh` now target custom synthdefs that must be loaded into the server first.
+- SuperDirt is a better fit than ad hoc synthdefs for this stage because METL layer names like `bd`, `sd`, and `hh` can map directly onto an existing sample library.
+- The active OSC target for SuperDirt is `127.0.0.1:57120`, not the raw `scsynth` port `57110`.
+- SuperDirt expects OSC trigger messages on its own listening port after `SuperDirt.start`, rather than direct `/s_new` traffic to the audio server.
 - `s.dumpOSC(1);` in SuperCollider is the fastest way to see whether `fin` is actually reaching the server.
 
 ## Setup
 
 1. Install Rust.
 2. Install SuperCollider from the official downloads page: <https://supercollider.github.io/downloads.html>
+3. Install the SuperDirt quark in SuperCollider:
+
+```supercollider
+include("SuperDirt");
+```
+
 3. From this repo, build or run `fin`.
 
 For direct shell use:
@@ -54,11 +58,14 @@ In the SuperCollider IDE:
 
 ```supercollider
 s.boot;
-// then evaluate the contents of supercollider/fin_setup.scd
-Synth(\fin_bd);
+// evaluate supercollider/superdirt_startup.scd
 ```
 
-If `Synth(\fin_bd);` makes sound, the server and FIN synthdefs are working.
+You should see:
+
+```text
+SuperDirt: listening on port 57120
+```
 
 Useful debugging commands:
 
@@ -68,7 +75,7 @@ s.freeAll;
 s.dumpOSC(1);
 ```
 
-The setup script is at [supercollider/fin_setup.scd](/Users/aimeeco/fin/supercollider/fin_setup.scd). Run it after `s.boot;` whenever you start a fresh SuperCollider session.
+The startup script is at [supercollider/superdirt_startup.scd](/Users/aimeeco/fin/supercollider/superdirt_startup.scd). Run it after installing SuperDirt and whenever you start a fresh SuperCollider session.
 
 ## Commands
 
@@ -93,17 +100,17 @@ fin watch examples/basic.metl
 Use a custom OSC target:
 
 ```bash
-fin watch --host 127.0.0.1 --port 57110 examples/basic.metl
+fin watch --host 127.0.0.1 --port 57120 examples/basic.metl
 ```
 
 `watch` keeps the last good program loaded and re-reads the file at each bar boundary. If a new edit fails to parse, the previous good schedule keeps playing and the reload error is printed to stderr.
 
-Current layer-to-synth mapping:
+Current layer-to-sound mapping:
 
-- `bd` -> `fin_bd`
-- `sd` -> `fin_sd`
-- `hh` -> `fin_hh`
-- any other symbol -> `fin_tone`
+- `bd` -> SuperDirt `bd`
+- `sd` -> SuperDirt `sd`
+- `hh` -> SuperDirt `hh`
+- any other symbol -> the same sound name is sent through to SuperDirt
 
 ## Example
 

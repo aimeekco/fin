@@ -8,7 +8,7 @@ use std::thread;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rosc::{OscMessage, OscPacket, encoder};
+use rosc::OscPacket;
 
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -114,10 +114,9 @@ fn run_sends_osc_packets() {
 
     let receiver = thread::spawn(move || {
         let mut trigger_count = 0usize;
-        let mut release_count = 0usize;
         let mut buffer = [0u8; 1024];
-        while trigger_count < 2 || release_count < 2 {
-            let (size, from) = listener
+        while trigger_count < 2 {
+            let (size, _) = listener
                 .recv_from(&mut buffer)
                 .expect("should receive OSC data");
             let packet = rosc::decoder::decode_udp(&buffer[..size])
@@ -127,23 +126,11 @@ fn run_sends_osc_packets() {
                 continue;
             };
 
-            match message.addr.as_str() {
-                "/status" => {
-                    let reply = OscPacket::Message(OscMessage {
-                        addr: "/status.reply".to_string(),
-                        args: Vec::new(),
-                    });
-                    let bytes = encoder::encode(&reply).expect("reply should encode");
-                    listener
-                        .send_to(&bytes, from)
-                        .expect("should send status reply");
-                }
-                "/s_new" => trigger_count += 1,
-                "/n_set" => release_count += 1,
-                _ => {}
+            if message.addr == "/dirt/play" {
+                trigger_count += 1;
             }
         }
-        (trigger_count, release_count)
+        trigger_count
     });
 
     let path = temp_file_path("metl");
@@ -162,33 +149,5 @@ fn run_sends_osc_packets() {
     fs::remove_file(&path).expect("should clean up temp file");
 
     assert!(output.status.success());
-    assert_eq!(receiver.join().expect("receiver should finish"), (2, 2));
-}
-
-#[test]
-fn run_reports_missing_supercollider_server() {
-    let probe = UdpSocket::bind("127.0.0.1:0").expect("probe should bind");
-    let port = probe
-        .local_addr()
-        .expect("probe should have address")
-        .port();
-    drop(probe);
-
-    let path = temp_file_path("metl");
-    fs::write(&path, "bpm = 960\n[bd] /1\n").expect("should write test file");
-
-    let output = Command::new(env!("CARGO_BIN_EXE_fin"))
-        .arg("run")
-        .arg("--host")
-        .arg("127.0.0.1")
-        .arg("--port")
-        .arg(port.to_string())
-        .arg(&path)
-        .output()
-        .expect("command should run");
-
-    fs::remove_file(&path).expect("should clean up temp file");
-
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("did not receive `/status.reply`"));
+    assert_eq!(receiver.join().expect("receiver should finish"), 2);
 }
