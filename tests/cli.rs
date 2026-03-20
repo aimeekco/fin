@@ -44,6 +44,27 @@ fn run_prints_expected_schedule() {
 }
 
 #[test]
+fn run_prints_density_and_shifted_schedule() {
+    let path = temp_file_path("metl");
+    fs::write(&path, "bpm = 120\n[hh] *4 >> 0.25\n").expect("should write test file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fin"))
+        .arg("run")
+        .arg("--no-play")
+        .arg(&path)
+        .output()
+        .expect("command should run");
+
+    fs::remove_file(&path).expect("should clean up temp file");
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "bpm=120\nhh  beat=0.000  bar=0.000\nhh  beat=1.000  bar=0.250\nhh  beat=2.000  bar=0.500\nhh  beat=3.000  bar=0.750\n"
+    );
+}
+
+#[test]
 fn watch_reloads_on_bar_boundary() {
     let path = temp_file_path("metl");
     fs::write(&path, "bpm = 1200\n[bd] /1\n").expect("should write test file");

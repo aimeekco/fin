@@ -34,9 +34,11 @@ pub enum PatternSource {
     ImplicitSelf,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Modifier {
     Divide(u32),
+    Multiply(u32),
+    Shift(f32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

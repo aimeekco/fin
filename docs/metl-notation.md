@@ -9,6 +9,8 @@ The current parser supports:
 - `bpm = <number>`
 - bare layer headers like `[bd]`
 - division with `/n`
+- density multiplication with `*n`
+- bar-relative offset with `<< n` and `>> n`
 - line comments starting with `#`
 
 Example:
@@ -16,7 +18,8 @@ Example:
 ```ini
 bpm = 128
 [bd] /4
-[sd] /2
+[sd] /2 >> 0.25
+[hh] *8
 ```
 
 Current semantics:
@@ -24,6 +27,9 @@ Current semantics:
 - `[bd] /4` means "trigger `bd` four times across one 4/4 bar"
 - `/4` produces beat positions `0, 1, 2, 3`
 - `/2` produces beat positions `0, 2`
+- `*n` multiplies the number of evenly spaced trigger slots in the bar
+- `>> n` shifts a layer later by `n` bars
+- `<< n` shifts a layer earlier by `n` bars
 - if `bpm` is omitted, playback defaults to `120`
 - runtime playback currently sends layer names directly to SuperDirt as sound names
 
@@ -63,6 +69,31 @@ Interpretation in 4/4:
 - `/4` means quarter-note triggers
 - `/8` means eighth-note triggers
 
+`*n` multiplies the density of those trigger slots.
+
+```ini
+[hh] *4
+[bd] /2 *2
+```
+
+Interpretation in 4/4:
+
+- `*4` on its own produces four evenly spaced events in the bar
+- `/2 *2` produces four events because the two-slot pattern is doubled in density
+
+`>> n` and `<< n` shift an entire layer within the bar with wraparound.
+
+```ini
+[sd] /2 >> 0.25
+[hh] *4 << 0.125
+```
+
+Interpretation in 4/4:
+
+- `>> 0.25` shifts events later by one beat
+- `<< 0.125` shifts events earlier by half a beat
+- wrapped events stay inside the current bar
+
 ## Comments
 
 Use `#` for comments:
@@ -84,8 +115,6 @@ The design target for METL still includes the following syntax, but it is not im
 
 Planned operators:
 
-- `*n` for density multiplication
-- `<< n` and `>> n` for bar-relative offsets
 - `~ n` for probability
 - `.method value` for effect-style parameter chaining
 - `< >` for ordered cycles

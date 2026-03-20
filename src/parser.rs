@@ -3,9 +3,11 @@ use std::fmt;
 
 use nom::IResult;
 use nom::Parser;
+use nom::branch::alt;
+use nom::bytes::complete::tag;
 use nom::bytes::complete::take_while1;
 use nom::character::complete::{char, digit1, multispace0, one_of, space0};
-use nom::combinator::{all_consuming, map_res, opt, recognize};
+use nom::combinator::{all_consuming, map, map_res, recognize};
 use nom::multi::many0;
 use nom::number::complete::recognize_float;
 use nom::sequence::{delimited, preceded, separated_pair};
@@ -91,18 +93,13 @@ fn parse_assignment_statement(line: &str, line_no: usize) -> Result<Statement, P
 }
 
 fn parse_layer_statement(line: &str, line_no: usize) -> Result<Statement, ParseError> {
-    let (_, (name, divide)) =
-        all_consuming((layer_header, opt(preceded(multispace0, divide_modifier))))
+    let (_, (name, modifiers)) =
+        all_consuming((layer_header, many0(preceded(multispace0, modifier))))
             .parse(line)
             .map_err(|_| ParseError {
                 line: line_no,
                 message: "invalid layer statement".to_string(),
             })?;
-
-    let mut modifiers = Vec::new();
-    if let Some(divide) = divide {
-        modifiers.push(Modifier::Divide(divide));
-    }
 
     Ok(Statement::Layer(Layer {
         name: Symbol(name.to_string()),
@@ -141,6 +138,39 @@ fn divide_modifier(input: &str) -> IResult<&str, u32> {
     .parse(input)
 }
 
+fn multiply_modifier(input: &str) -> IResult<&str, u32> {
+    map_res(preceded(char('*'), digit1), |value: &str| {
+        let parsed = value.parse::<u32>().map_err(|_| "invalid multiply value")?;
+        if parsed == 0 {
+            return Err("multiply must be greater than zero");
+        }
+        Ok::<u32, &'static str>(parsed)
+    })
+    .parse(input)
+}
+
+fn shift_right_modifier(input: &str) -> IResult<&str, f32> {
+    preceded(tag(">>"), preceded(multispace0, float_value)).parse(input)
+}
+
+fn shift_left_modifier(input: &str) -> IResult<&str, f32> {
+    map(
+        preceded(tag("<<"), preceded(multispace0, float_value)),
+        |value| -value,
+    )
+    .parse(input)
+}
+
+fn modifier(input: &str) -> IResult<&str, Modifier> {
+    alt((
+        map(divide_modifier, Modifier::Divide),
+        map(multiply_modifier, Modifier::Multiply),
+        map(shift_right_modifier, Modifier::Shift),
+        map(shift_left_modifier, Modifier::Shift),
+    ))
+    .parse(input)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,6 +191,24 @@ mod tests {
         assert_eq!(layer.name, Symbol("bd".to_string()));
         assert_eq!(layer.pattern, PatternSource::ImplicitSelf);
         assert_eq!(layer.modifiers, vec![Modifier::Divide(4)]);
+    }
+
+    #[test]
+    fn parses_density_and_shift_modifiers() {
+        let program = parse_program("[hh] *8 >> 0.25").expect("parse should succeed");
+        assert_eq!(
+            program.layers[0].modifiers,
+            vec![Modifier::Multiply(8), Modifier::Shift(0.25)]
+        );
+    }
+
+    #[test]
+    fn parses_left_shift_modifier() {
+        let program = parse_program("[sd] /2 << 0.5").expect("parse should succeed");
+        assert_eq!(
+            program.layers[0].modifiers,
+            vec![Modifier::Divide(2), Modifier::Shift(-0.5)]
+        );
     }
 
     #[test]
@@ -185,8 +233,14 @@ mod tests {
     }
 
     #[test]
-    fn rejects_phase_two_syntax_for_now() {
-        let error = parse_program("[hh] *16").expect_err("parse should fail");
+    fn rejects_multiply_by_zero() {
+        let error = parse_program("[hh] *0").expect_err("parse should fail");
+        assert_eq!(error.line, 1);
+    }
+
+    #[test]
+    fn rejects_unknown_modifier_syntax() {
+        let error = parse_program("[hh] .gain 0.6").expect_err("parse should fail");
         assert_eq!(error.line, 1);
     }
 }

@@ -17,6 +17,8 @@ Implemented METL subset:
 - `bpm = <number>`
 - `[layer]`
 - `/n`
+- `*n`
+- `<< n` and `>> n`
 - `# comments`
 
 ## What We Learned
