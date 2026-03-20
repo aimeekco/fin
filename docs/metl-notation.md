@@ -9,6 +9,7 @@ The current parser supports:
 - `bpm = <number>`
 - bare layer headers like `[bd]`
 - sample-index headers like `[bd:3]`
+- note sequences like `[g4 a4 a3 c3]`
 - explicit pattern bodies with `<...>` and `[...]`
 - division with `/n`
 - density multiplication with `*n`
@@ -20,6 +21,7 @@ Example:
 
 ```ini
 bpm = 128
+[bass] [g4 a4 a3 c3]
 [bd] <0 3 5 7> /1
 [sd] /2 >> 0.25 .gain 0.8
 [hh] [hh hh:2] *4 .pan 0.2 .speed 1.1 .sustain 0.15
@@ -56,12 +58,20 @@ Supported explicit pattern forms:
 
 - `<a b c>` cycles one item per bar
 - `[a b c]` triggers all listed items in the same slot
+- `[g4 a4 a3 c3]` on a pitched layer subdivides the slot into note events
 
 Pattern atoms may be:
 
 - a sample index number like `3`, which becomes `n=3` on the current layer sound
 - a sound name like `bd` or `808sd`
 - a sound name with sample index like `sd:2`
+
+Note sequences:
+
+- note names use letter names plus octave, for example `c3`, `g4`, `fs4`, `bf2`
+- note values are sent to SuperDirt as `note`
+- a note sequence with no `/n` divides the whole bar evenly across the listed notes
+- with `/n`, the note sequence subdivides each slot produced by the timing operators
 
 Runtime voice mapping today:
 

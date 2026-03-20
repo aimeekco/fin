@@ -53,7 +53,7 @@ impl OscClient {
         for event in events {
             let target_offset = beat_to_duration(event.beat_pos, program.effective_bpm());
             sleep_until(target_offset, &mut current_offset);
-            let voice = voice_for_layer(&event.sound.name).with_params(event.params);
+            let voice = voice_for_layer(&event.sound.name).with_params(event.params.clone());
             let packet = build_trigger_packet(&event.sound, voice);
             self.send(&packet)?;
         }
@@ -94,8 +94,6 @@ pub fn build_trigger_packet(sound: &SoundTarget, voice: VoiceConfig) -> OscPacke
         OscType::Float(voice.gain),
         OscType::String("pan".to_string()),
         OscType::Float(voice.pan),
-        OscType::String("freq".to_string()),
-        OscType::Float(voice.freq),
         OscType::String("speed".to_string()),
         OscType::Float(voice.speed),
         OscType::String("sustain".to_string()),
@@ -103,6 +101,14 @@ pub fn build_trigger_packet(sound: &SoundTarget, voice: VoiceConfig) -> OscPacke
         OscType::String("orbit".to_string()),
         OscType::Int(0),
     ];
+
+    match voice.note {
+        Some(note) => args.extend([OscType::String("note".to_string()), OscType::Float(note)]),
+        None => args.extend([
+            OscType::String("freq".to_string()),
+            OscType::Float(voice.freq),
+        ]),
+    }
 
     if let Some(index) = sound.index {
         args.extend([OscType::String("n".to_string()), OscType::Int(index)]);
@@ -118,6 +124,7 @@ pub fn build_trigger_packet(sound: &SoundTarget, voice: VoiceConfig) -> OscPacke
 pub struct VoiceConfig {
     gain: f32,
     freq: f32,
+    note: Option<f32>,
     pan: f32,
     speed: f32,
     sustain: Duration,
@@ -127,6 +134,7 @@ impl VoiceConfig {
     fn with_params(self, params: EventParams) -> Self {
         Self {
             gain: params.gain.unwrap_or(self.gain),
+            note: params.note.or(self.note),
             pan: params.pan.unwrap_or(self.pan),
             speed: params.speed.unwrap_or(self.speed),
             sustain: params
@@ -143,6 +151,7 @@ fn voice_for_layer(name: &str) -> VoiceConfig {
         "bd" => VoiceConfig {
             gain: 1.0,
             freq: 55.0,
+            note: None,
             pan: 0.0,
             speed: 1.0,
             sustain: Duration::from_millis(180),
@@ -150,6 +159,7 @@ fn voice_for_layer(name: &str) -> VoiceConfig {
         "sd" => VoiceConfig {
             gain: 0.9,
             freq: 180.0,
+            note: None,
             pan: -0.1,
             speed: 1.0,
             sustain: Duration::from_millis(140),
@@ -157,6 +167,7 @@ fn voice_for_layer(name: &str) -> VoiceConfig {
         "hh" => VoiceConfig {
             gain: 0.7,
             freq: 880.0,
+            note: None,
             pan: 0.2,
             speed: 1.0,
             sustain: Duration::from_millis(70),
@@ -164,6 +175,7 @@ fn voice_for_layer(name: &str) -> VoiceConfig {
         _ => VoiceConfig {
             gain: 0.8,
             freq: 440.0,
+            note: None,
             pan: 0.0,
             speed: 1.0,
             sustain: Duration::from_millis(160),
@@ -200,14 +212,14 @@ mod tests {
                 OscType::Float(1.0),
                 OscType::String("pan".to_string()),
                 OscType::Float(0.0),
-                OscType::String("freq".to_string()),
-                OscType::Float(55.0),
                 OscType::String("speed".to_string()),
                 OscType::Float(1.0),
                 OscType::String("sustain".to_string()),
                 OscType::Float(0.18),
                 OscType::String("orbit".to_string()),
                 OscType::Int(0),
+                OscType::String("freq".to_string()),
+                OscType::Float(55.0),
             ]
         );
     }
@@ -232,6 +244,8 @@ mod tests {
             pan: Some(-0.5),
             speed: Some(1.25),
             sustain: None,
+            note: None,
+            note_label: None,
         });
         assert_eq!(voice.gain, 0.4);
         assert_eq!(voice.pan, -0.5);
@@ -259,5 +273,31 @@ mod tests {
                 .args
                 .ends_with(&[OscType::String("n".to_string()), OscType::Int(3),])
         );
+    }
+
+    #[test]
+    fn includes_note_when_present() {
+        let voice = voice_for_layer("bass").with_params(EventParams {
+            gain: None,
+            pan: None,
+            speed: None,
+            sustain: None,
+            note: Some(-5.0),
+            note_label: Some("g4".to_string()),
+        });
+        let packet = build_trigger_packet(
+            &SoundTarget {
+                name: "bass".to_string(),
+                index: None,
+            },
+            voice,
+        );
+
+        let OscPacket::Message(message) = packet else {
+            panic!("expected message packet");
+        };
+
+        assert!(message.args.contains(&OscType::String("note".to_string())));
+        assert!(message.args.contains(&OscType::Float(-5.0)));
     }
 }

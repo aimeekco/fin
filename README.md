@@ -17,6 +17,7 @@ Implemented METL subset:
 - `bpm = <number>`
 - `[layer]`
 - `[layer:index]`
+- note sequences like `[g4 a4 a3 c3]`
 - explicit pattern bodies with `<...>` and `[...]`
 - `/n`
 - `*n`
@@ -53,12 +54,45 @@ cargo run -- run examples/basic.metl
 
 ## SuperCollider Workflow
 
-In the SuperCollider IDE:
+One-time install, in SuperCollider:
 
 ```supercollider
-s.boot;
-// evaluate supercollider/superdirt_startup.scd
+include("SuperDirt");
 ```
+
+After that, you do not need the IDE to start SuperDirt.
+
+Start it as a managed background process:
+
+```bash
+fin superdirt
+```
+
+Check it:
+
+```bash
+fin superdirt status
+```
+
+Stop it:
+
+```bash
+fin superdirt kill
+```
+
+If you want the old foreground behavior:
+
+```bash
+fin superdirt --foreground
+```
+
+There is also a direct shell wrapper from the repo:
+
+```bash
+./scripts/start-superdirt.sh
+```
+
+Both paths launch `sclang` directly and run [supercollider/superdirt_startup.scd](/Users/aimeeco/fin/supercollider/superdirt_startup.scd) headlessly.
 
 You should see:
 
@@ -74,7 +108,24 @@ s.freeAll;
 s.dumpOSC(1);
 ```
 
-The startup script is at [supercollider/superdirt_startup.scd](/Users/aimeeco/fin/supercollider/superdirt_startup.scd). Run it after installing SuperDirt and whenever you start a fresh SuperCollider session.
+Use a custom port if needed:
+
+```bash
+fin superdirt --port 57121
+./scripts/start-superdirt.sh 57121
+```
+
+If `sclang` is not on your `PATH`, either pass it directly:
+
+```bash
+fin superdirt --sclang /Applications/SuperCollider.app/Contents/MacOS/sclang
+```
+
+or set:
+
+```bash
+export FIN_SCLANG_BIN=/Applications/SuperCollider.app/Contents/MacOS/sclang
+```
 
 ## Commands
 
@@ -96,6 +147,25 @@ Run a continuous live-reload loop:
 fin watch examples/basic.metl
 ```
 
+Run the TUI dashboard:
+
+```bash
+fin dashboard examples/basic.metl
+```
+
+Start SuperDirt without the IDE:
+
+```bash
+fin superdirt
+```
+
+Check or stop the managed background process:
+
+```bash
+fin superdirt status
+fin superdirt kill
+```
+
 Use a custom OSC target:
 
 ```bash
@@ -103,6 +173,8 @@ fin watch --host 127.0.0.1 --port 57120 examples/basic.metl
 ```
 
 `watch` keeps the last good program loaded and re-reads the file at each bar boundary. If a new edit fails to parse, the previous good schedule keeps playing and the reload error is printed to stderr.
+
+`dashboard` runs the same bar-by-bar engine in an alternate-screen TUI with layer meters and recent logs. Press `q` to quit between bar updates.
 
 Current layer-to-sound mapping:
 
@@ -117,6 +189,7 @@ Current layer-to-sound mapping:
 
 ```ini
 bpm = 128
+[bass] [g4 a4 a3 c3]
 [bd] <0 3 5 7> /1
 [sd] /2 >> 0.25 .gain 0.8
 [hh] [hh hh:2] *4 .pan 0.2 .speed 1.1 .sustain 0.15

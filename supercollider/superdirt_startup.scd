@@ -1,4 +1,8 @@
 (
+var argv = thisProcess.argv ? [];
+var portValue = if(argv.notEmpty and: { argv[0].notNil }) { argv[0].asString } { nil };
+var dirtPort = if(portValue.isNil or: { portValue.isEmpty }) { 57120 } { portValue.asInteger };
+
 s.reboot {
     s.options.numBuffers = 1024 * 256;
     s.options.memSize = 8192 * 32;
@@ -8,12 +12,12 @@ s.reboot {
     s.options.numInputBusChannels = 2;
 
     s.waitForBoot {
-        ~dirt.stop;
+        if(~dirt.notNil) { ~dirt.stop; };
         ~dirt = SuperDirt(2, s);
         ~dirt.loadSoundFiles;
-        ~dirt.start(57120, 0 ! 12);
+        ~dirt.start(dirtPort, 0 ! 12);
         SuperDirt.default = ~dirt;
-        "SuperDirt: listening on port 57120".postln;
+        ("SuperDirt: listening on port " ++ dirtPort).postln;
     };
 
     s.latency = 0.3;

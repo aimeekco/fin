@@ -2,7 +2,8 @@ use std::error::Error;
 use std::fmt;
 
 use crate::model::{
-    EventParams, Meter, Modifier, PatternAtom, PatternSource, Program, ScheduledEvent, SoundTarget,
+    EventParams, Layer, Meter, Modifier, NoteValue, PatternAtom, PatternSource, Program,
+    ScheduledEvent, SoundTarget,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,20 +63,35 @@ pub fn schedule_bar(
         let slots = divide
             .checked_mul(multiply)
             .ok_or_else(|| ScheduleError::new("slot count overflowed supported range"))?;
-        let targets = resolve_pattern_targets(layer, bar_index)?;
+        match &layer.pattern {
+            PatternSource::NoteSequence(notes) => {
+                schedule_note_sequence(
+                    &mut events,
+                    layer,
+                    notes,
+                    slots,
+                    shift,
+                    params.clone(),
+                    meter,
+                )?;
+            }
+            _ => {
+                let targets = resolve_pattern_targets(layer, bar_index)?;
 
-        for slot in 0..slots {
-            let base_bar_pos = slot as f32 / slots as f32;
-            let bar_pos = (base_bar_pos + shift).rem_euclid(1.0);
-            let beat_pos = meter.beats_per_bar as f32 * bar_pos;
-            for sound in &targets {
-                events.push(ScheduledEvent {
-                    layer: layer.name.clone(),
-                    sound: sound.clone(),
-                    bar_pos,
-                    beat_pos,
-                    params,
-                });
+                for slot in 0..slots {
+                    let base_bar_pos = slot as f32 / slots as f32;
+                    let bar_pos = (base_bar_pos + shift).rem_euclid(1.0);
+                    let beat_pos = meter.beats_per_bar as f32 * bar_pos;
+                    for sound in &targets {
+                        events.push(ScheduledEvent {
+                            layer: layer.name.clone(),
+                            sound: sound.clone(),
+                            bar_pos,
+                            beat_pos,
+                            params: params.clone(),
+                        });
+                    }
+                }
             }
         }
     }
@@ -104,13 +120,20 @@ pub fn format_events(program: &Program, events: &[ScheduledEvent]) -> String {
     lines.extend(events.iter().map(|event| {
         format!(
             "{}  beat={:.3}  bar={:.3}",
-            event.sound.display_name(),
+            event_label(event),
             event.beat_pos,
             event.bar_pos
         )
     }));
 
     lines.join("\n")
+}
+
+fn event_label(event: &ScheduledEvent) -> String {
+    match &event.params.note_label {
+        Some(note) => format!("{}@{note}", event.sound.display_name()),
+        None => event.sound.display_name(),
+    }
 }
 
 fn resolve_pattern_targets(
@@ -130,6 +153,9 @@ fn resolve_pattern_targets(
             };
             Ok(vec![resolve_atom(atom, &layer.default_target)?])
         }
+        PatternSource::NoteSequence(_) => Err(ScheduleError::new(
+            "note sequences are expanded directly during scheduling",
+        )),
     }
 }
 
@@ -143,10 +169,50 @@ fn resolve_atom(
     }
 }
 
+fn schedule_note_sequence(
+    events: &mut Vec<ScheduledEvent>,
+    layer: &Layer,
+    notes: &[NoteValue],
+    slots: u32,
+    shift: f32,
+    params: EventParams,
+    meter: Meter,
+) -> Result<(), ScheduleError> {
+    if notes.is_empty() {
+        return Err(ScheduleError::new("note sequence cannot be empty"));
+    }
+
+    for slot in 0..slots {
+        let slot_start = slot as f32 / slots as f32;
+        let slot_width = 1.0 / slots as f32;
+
+        for (index, note) in notes.iter().enumerate() {
+            let subdivision = index as f32 / notes.len() as f32;
+            let bar_pos = (slot_start + subdivision * slot_width + shift).rem_euclid(1.0);
+            let beat_pos = meter.beats_per_bar as f32 * bar_pos;
+            let mut note_params = params.clone();
+            note_params.note = Some(note.semitone);
+            note_params.note_label = Some(note.label.clone());
+
+            events.push(ScheduledEvent {
+                layer: layer.name.clone(),
+                sound: layer.default_target.clone(),
+                bar_pos,
+                beat_pos,
+                params: note_params,
+            });
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Layer, Modifier, PatternAtom, PatternSource, Program, SoundTarget, Symbol};
+    use crate::model::{
+        Layer, Modifier, NoteValue, PatternAtom, PatternSource, Program, SoundTarget, Symbol,
+    };
 
     fn make_program(modifiers: Vec<Modifier>) -> Program {
         Program {
@@ -313,5 +379,49 @@ mod tests {
             .map(|event| event.sound.display_name())
             .collect();
         assert_eq!(labels, vec!["bd".to_string(), "sd:2".to_string()]);
+    }
+
+    #[test]
+    fn note_sequence_subdivides_the_slot() {
+        let program = Program {
+            bpm: Some(128.0),
+            layers: vec![Layer {
+                name: Symbol("bass".to_string()),
+                default_target: SoundTarget {
+                    name: "bass".to_string(),
+                    index: None,
+                },
+                pattern: PatternSource::NoteSequence(vec![
+                    NoteValue {
+                        label: "g4".to_string(),
+                        semitone: -5.0,
+                    },
+                    NoteValue {
+                        label: "a4".to_string(),
+                        semitone: -3.0,
+                    },
+                    NoteValue {
+                        label: "a3".to_string(),
+                        semitone: -15.0,
+                    },
+                    NoteValue {
+                        label: "c3".to_string(),
+                        semitone: -24.0,
+                    },
+                ]),
+                modifiers: vec![Modifier::Divide(1)],
+                source_line: 1,
+            }],
+        };
+
+        let events = schedule_bar(&program, Meter::default(), 0).expect("schedule should work");
+        let beats: Vec<f32> = events.iter().map(|event| event.beat_pos).collect();
+        let labels: Vec<String> = events
+            .iter()
+            .map(|event| event.params.note_label.clone().unwrap_or_default())
+            .collect();
+
+        assert_eq!(beats, vec![0.0, 1.0, 2.0, 3.0]);
+        assert_eq!(labels, vec!["g4", "a4", "a3", "c3"]);
     }
 }

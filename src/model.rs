@@ -52,18 +52,25 @@ impl SoundTarget {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PatternSource {
     ImplicitSelf,
     Atom(PatternAtom),
     Cycle(Vec<PatternAtom>),
     Group(Vec<PatternAtom>),
+    NoteSequence(Vec<NoteValue>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PatternAtom {
     SampleIndex(i32),
     Sound(SoundTarget),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NoteValue {
+    pub label: String,
+    pub semitone: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -101,10 +108,12 @@ pub struct ScheduledEvent {
     pub params: EventParams,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct EventParams {
     pub gain: Option<f32>,
     pub pan: Option<f32>,
     pub speed: Option<f32>,
     pub sustain: Option<f32>,
+    pub note: Option<f32>,
+    pub note_label: Option<String>,
 }

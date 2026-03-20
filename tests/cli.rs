@@ -10,6 +10,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rosc::OscPacket;
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn temp_file_path(extension: &str) -> PathBuf {
@@ -166,6 +169,27 @@ fn run_prints_group_pattern_body() {
 }
 
 #[test]
+fn run_prints_note_sequence_body() {
+    let path = temp_file_path("metl");
+    fs::write(&path, "bpm = 120\n[bass] [g4 a4 a3 c3]\n").expect("should write test file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fin"))
+        .arg("run")
+        .arg("--no-play")
+        .arg(&path)
+        .output()
+        .expect("command should run");
+
+    fs::remove_file(&path).expect("should clean up temp file");
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "bpm=120\nbass@g4  beat=0.000  bar=0.000\nbass@a4  beat=1.000  bar=0.250\nbass@a3  beat=2.000  bar=0.500\nbass@c3  beat=3.000  bar=0.750\n"
+    );
+}
+
+#[test]
 fn watch_reloads_on_bar_boundary() {
     let path = temp_file_path("metl");
     fs::write(&path, "bpm = 1200\n[bd] /1\n").expect("should write test file");
@@ -221,6 +245,77 @@ fn run_rejects_wrong_extension() {
 
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("expected a `.metl` source file"));
+}
+
+#[test]
+fn superdirt_background_lifecycle_commands_work() {
+    let root = temp_file_path("dir");
+    fs::create_dir(&root).expect("root dir should exist");
+    let state_dir = root.join("state");
+    fs::create_dir(&state_dir).expect("state dir should exist");
+    let fake_sclang = root.join("fake-sclang.sh");
+    fs::write(
+        &fake_sclang,
+        "#!/usr/bin/env bash\nset -euo pipefail\necho \"fake-sclang $@\"\ntrap 'exit 0' TERM INT\nwhile true; do sleep 1; done\n",
+    )
+    .expect("fake sclang should be written");
+    #[cfg(unix)]
+    fs::set_permissions(&fake_sclang, fs::Permissions::from_mode(0o755))
+        .expect("fake sclang should be executable");
+
+    let start = Command::new(env!("CARGO_BIN_EXE_fin"))
+        .arg("superdirt")
+        .arg("--sclang")
+        .arg(&fake_sclang)
+        .arg("--port")
+        .arg("57129")
+        .env("FIN_SUPERDIRT_STATE_DIR", &state_dir)
+        .output()
+        .expect("command should run");
+
+    assert!(start.status.success());
+    let start_stdout = String::from_utf8_lossy(&start.stdout);
+    assert!(start_stdout.contains("SuperDirt started in background"));
+    assert!(start_stdout.contains("57129"));
+
+    let status = Command::new(env!("CARGO_BIN_EXE_fin"))
+        .arg("superdirt")
+        .arg("status")
+        .env("FIN_SUPERDIRT_STATE_DIR", &state_dir)
+        .output()
+        .expect("status should run");
+
+    assert!(status.status.success());
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(status_stdout.contains("SuperDirt running"));
+    assert!(status_stdout.contains("57129"));
+
+    let log_path = state_dir.join("superdirt.log");
+    let log_contents = fs::read_to_string(&log_path).expect("log should exist");
+    assert!(log_contents.contains("fake-sclang"));
+    assert!(log_contents.contains("57129"));
+
+    let kill = Command::new(env!("CARGO_BIN_EXE_fin"))
+        .arg("superdirt")
+        .arg("kill")
+        .env("FIN_SUPERDIRT_STATE_DIR", &state_dir)
+        .output()
+        .expect("kill should run");
+
+    assert!(kill.status.success());
+    assert!(String::from_utf8_lossy(&kill.stdout).contains("SuperDirt stopped"));
+
+    let stopped = Command::new(env!("CARGO_BIN_EXE_fin"))
+        .arg("superdirt")
+        .arg("status")
+        .env("FIN_SUPERDIRT_STATE_DIR", &state_dir)
+        .output()
+        .expect("status should run");
+
+    fs::remove_dir_all(&root).expect("should clean up temp tree");
+
+    assert!(stopped.status.success());
+    assert!(String::from_utf8_lossy(&stopped.stdout).contains("SuperDirt is not running"));
 }
 
 #[test]

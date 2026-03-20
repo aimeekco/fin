@@ -12,7 +12,9 @@ use nom::multi::{many0, separated_list1};
 use nom::number::complete::recognize_float;
 use nom::sequence::{delimited, preceded, separated_pair};
 
-use crate::model::{Layer, Modifier, PatternAtom, PatternSource, Program, SoundTarget, Symbol};
+use crate::model::{
+    Layer, Modifier, NoteValue, PatternAtom, PatternSource, Program, SoundTarget, Symbol,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseError {
@@ -191,7 +193,7 @@ fn effect_modifier<'a>(
 }
 
 fn pattern_source(input: &str) -> IResult<&str, PatternSource> {
-    alt((cycle_body, group_body, atom_body)).parse(input)
+    alt((cycle_body, note_sequence_body, group_body, atom_body)).parse(input)
 }
 
 fn cycle_body(input: &str) -> IResult<&str, PatternSource> {
@@ -218,6 +220,18 @@ fn group_body(input: &str) -> IResult<&str, PatternSource> {
     .parse(input)
 }
 
+fn note_sequence_body(input: &str) -> IResult<&str, PatternSource> {
+    map(
+        delimited(
+            char('['),
+            separated_list1(multispace1, note_value),
+            preceded(multispace0, char(']')),
+        ),
+        PatternSource::NoteSequence,
+    )
+    .parse(input)
+}
+
 fn atom_body(input: &str) -> IResult<&str, PatternSource> {
     map(pattern_atom, PatternSource::Atom).parse(input)
 }
@@ -236,6 +250,12 @@ fn pattern_atom(input: &str) -> IResult<&str, PatternAtom> {
         remaining,
         PatternAtom::Sound(parse_sound_target_token(token)?),
     ))
+}
+
+fn note_value(input: &str) -> IResult<&str, NoteValue> {
+    let (remaining, token) = token_value(input)?;
+    let note = parse_note_token(token)?;
+    Ok((remaining, note))
 }
 
 fn sound_target(input: &str) -> IResult<&str, SoundTarget> {
@@ -285,10 +305,63 @@ fn parse_sound_target_token(input: &str) -> Result<SoundTarget, nom::Err<nom::er
     })
 }
 
+fn parse_note_token(input: &str) -> Result<NoteValue, nom::Err<nom::error::Error<&str>>> {
+    let chars: Vec<char> = input.chars().collect();
+    if chars.len() < 2 {
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Fail,
+        )));
+    }
+
+    let pitch_class = match chars[0].to_ascii_lowercase() {
+        'c' => 0,
+        'd' => 2,
+        'e' => 4,
+        'f' => 5,
+        'g' => 7,
+        'a' => 9,
+        'b' => 11,
+        _ => {
+            return Err(nom::Err::Error(nom::error::Error::new(
+                input,
+                nom::error::ErrorKind::Fail,
+            )));
+        }
+    };
+
+    let mut index = 1usize;
+    let accidental = if let Some(accidental) = chars.get(index) {
+        match accidental {
+            '#' | 's' | 'S' => {
+                index += 1;
+                1
+            }
+            'b' | 'f' | 'F' => {
+                index += 1;
+                -1
+            }
+            _ => 0,
+        }
+    } else {
+        0
+    };
+
+    let octave = input[index..].parse::<i32>().map_err(|_| {
+        nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit))
+    })?;
+    let semitone = (pitch_class + accidental) as f32 + ((octave - 5) * 12) as f32;
+
+    Ok(NoteValue {
+        label: input.to_ascii_lowercase(),
+        semitone,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Modifier, PatternAtom, PatternSource, SoundTarget, Symbol};
+    use crate::model::{Modifier, NoteValue, PatternAtom, PatternSource, SoundTarget, Symbol};
 
     #[test]
     fn parses_bpm_assignment() {
@@ -394,6 +467,32 @@ mod tests {
                     name: "sd".to_string(),
                     index: Some(2),
                 }),
+            ])
+        );
+    }
+
+    #[test]
+    fn parses_note_sequence_body() {
+        let program = parse_program("[bass] [g4 a4 a3 c3]").expect("parse should succeed");
+        assert_eq!(
+            program.layers[0].pattern,
+            PatternSource::NoteSequence(vec![
+                NoteValue {
+                    label: "g4".to_string(),
+                    semitone: -5.0,
+                },
+                NoteValue {
+                    label: "a4".to_string(),
+                    semitone: -3.0,
+                },
+                NoteValue {
+                    label: "a3".to_string(),
+                    semitone: -15.0,
+                },
+                NoteValue {
+                    label: "c3".to_string(),
+                    semitone: -24.0,
+                },
             ])
         );
     }
