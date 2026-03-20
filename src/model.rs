@@ -15,6 +15,12 @@ pub struct Program {
     pub layers: Vec<Layer>,
 }
 
+impl Program {
+    pub fn effective_bpm(&self) -> f32 {
+        self.bpm.unwrap_or(120.0)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layer {
     pub name: Symbol,
