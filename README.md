@@ -16,19 +16,16 @@ Implemented METL subset:
 
 - `bpm = <number>`
 - `[layer]`
+- `[layer:index]`
+- explicit pattern bodies with `<...>` and `[...]`
 - `/n`
 - `*n`
 - `<< n` and `>> n`
+- `.gain <number>`
+- `.pan <number>`
+- `.speed <number>`
+- `.sustain <number>`
 - `# comments`
-
-## What We Learned
-
-- Booting SuperCollider through `s.boot;` is the simplest reliable setup for local development.
-- The repo binary and an older globally installed `fin` can diverge. `cargo run -- ...` is the safest way to verify the latest local code.
-- SuperDirt is a better fit than ad hoc synthdefs for this stage because METL layer names like `bd`, `sd`, and `hh` can map directly onto an existing sample library.
-- The active OSC target for SuperDirt is `127.0.0.1:57120`, not the raw `scsynth` port `57110`.
-- SuperDirt expects OSC trigger messages on its own listening port after `SuperDirt.start`, rather than direct `/s_new` traffic to the audio server.
-- `s.dumpOSC(1);` in SuperCollider is the fastest way to see whether `fin` is actually reaching the server.
 
 ## Setup
 
@@ -40,7 +37,7 @@ Implemented METL subset:
 include("SuperDirt");
 ```
 
-3. From this repo, build or run `fin`.
+4. From this repo, build or run `fin`.
 
 For direct shell use:
 
@@ -120,8 +117,9 @@ Current layer-to-sound mapping:
 
 ```ini
 bpm = 128
-[bd] /4
-[sd] /2
+[bd] <0 3 5 7> /1
+[sd] /2 >> 0.25 .gain 0.8
+[hh] [hh hh:2] *4 .pan 0.2 .speed 1.1 .sustain 0.15
 ```
 
 ## Documentation

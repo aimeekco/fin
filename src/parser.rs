@@ -5,14 +5,14 @@ use nom::IResult;
 use nom::Parser;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
-use nom::bytes::complete::take_while1;
-use nom::character::complete::{char, digit1, multispace0, one_of, space0};
-use nom::combinator::{all_consuming, map, map_res, recognize};
-use nom::multi::many0;
+use nom::bytes::complete::{take_till1, take_while1};
+use nom::character::complete::{char, digit1, multispace0, multispace1, one_of, space0};
+use nom::combinator::{all_consuming, map, map_res, opt, recognize};
+use nom::multi::{many0, separated_list1};
 use nom::number::complete::recognize_float;
 use nom::sequence::{delimited, preceded, separated_pair};
 
-use crate::model::{Layer, Modifier, PatternSource, Program, Symbol};
+use crate::model::{Layer, Modifier, PatternAtom, PatternSource, Program, SoundTarget, Symbol};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseError {
@@ -93,17 +93,23 @@ fn parse_assignment_statement(line: &str, line_no: usize) -> Result<Statement, P
 }
 
 fn parse_layer_statement(line: &str, line_no: usize) -> Result<Statement, ParseError> {
-    let (_, (name, modifiers)) =
-        all_consuming((layer_header, many0(preceded(multispace0, modifier))))
-            .parse(line)
-            .map_err(|_| ParseError {
-                line: line_no,
-                message: "invalid layer statement".to_string(),
-            })?;
+    let (_, (default_target, pattern, modifiers)) = all_consuming((
+        layer_header,
+        opt(preceded(multispace0, pattern_source)),
+        many0(preceded(multispace0, modifier)),
+    ))
+    .parse(line)
+    .map_err(|_| ParseError {
+        line: line_no,
+        message: "invalid layer statement".to_string(),
+    })?;
+
+    let name = Symbol(default_target.display_name());
 
     Ok(Statement::Layer(Layer {
-        name: Symbol(name.to_string()),
-        pattern: PatternSource::ImplicitSelf,
+        name,
+        default_target,
+        pattern: pattern.unwrap_or(PatternSource::ImplicitSelf),
         modifiers,
         source_line: line_no,
     }))
@@ -119,8 +125,8 @@ fn identifier(input: &str) -> IResult<&str, &str> {
     .parse(input)
 }
 
-fn layer_header(input: &str) -> IResult<&str, &str> {
-    delimited(char('['), identifier, char(']')).parse(input)
+fn layer_header(input: &str) -> IResult<&str, SoundTarget> {
+    delimited(char('['), sound_target, char(']')).parse(input)
 }
 
 fn float_value(input: &str) -> IResult<&str, f32> {
@@ -167,14 +173,122 @@ fn modifier(input: &str) -> IResult<&str, Modifier> {
         map(multiply_modifier, Modifier::Multiply),
         map(shift_right_modifier, Modifier::Shift),
         map(shift_left_modifier, Modifier::Shift),
+        map(effect_modifier("gain"), Modifier::Gain),
+        map(effect_modifier("pan"), Modifier::Pan),
+        map(effect_modifier("speed"), Modifier::Speed),
+        map(effect_modifier("sustain"), Modifier::Sustain),
     ))
     .parse(input)
+}
+
+fn effect_modifier<'a>(
+    name: &'static str,
+) -> impl Parser<&'a str, Output = f32, Error = nom::error::Error<&'a str>> {
+    preceded(
+        tag("."),
+        preceded(tag(name), preceded(multispace0, float_value)),
+    )
+}
+
+fn pattern_source(input: &str) -> IResult<&str, PatternSource> {
+    alt((cycle_body, group_body, atom_body)).parse(input)
+}
+
+fn cycle_body(input: &str) -> IResult<&str, PatternSource> {
+    map(
+        delimited(
+            char('<'),
+            separated_list1(multispace1, pattern_atom),
+            preceded(multispace0, char('>')),
+        ),
+        PatternSource::Cycle,
+    )
+    .parse(input)
+}
+
+fn group_body(input: &str) -> IResult<&str, PatternSource> {
+    map(
+        delimited(
+            char('['),
+            separated_list1(multispace1, pattern_atom),
+            preceded(multispace0, char(']')),
+        ),
+        PatternSource::Group,
+    )
+    .parse(input)
+}
+
+fn atom_body(input: &str) -> IResult<&str, PatternSource> {
+    map(pattern_atom, PatternSource::Atom).parse(input)
+}
+
+fn pattern_atom(input: &str) -> IResult<&str, PatternAtom> {
+    let (remaining, token) = token_value(input)?;
+
+    if token.chars().all(|ch| ch.is_ascii_digit()) {
+        let index = token.parse::<i32>().map_err(|_| {
+            nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit))
+        })?;
+        return Ok((remaining, PatternAtom::SampleIndex(index)));
+    }
+
+    Ok((
+        remaining,
+        PatternAtom::Sound(parse_sound_target_token(token)?),
+    ))
+}
+
+fn sound_target(input: &str) -> IResult<&str, SoundTarget> {
+    let (remaining, token) = token_value(input)?;
+    Ok((remaining, parse_sound_target_token(token)?))
+}
+
+fn token_value(input: &str) -> IResult<&str, &str> {
+    take_till1(|c: char| c.is_whitespace() || matches!(c, '[' | ']' | '<' | '>')).parse(input)
+}
+
+fn parse_sound_target_token(input: &str) -> Result<SoundTarget, nom::Err<nom::error::Error<&str>>> {
+    let (name, index) = match input.split_once(':') {
+        Some((name, index)) => (name, Some(index)),
+        None => (input, None),
+    };
+
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    {
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Fail,
+        )));
+    }
+
+    let index = match index {
+        Some(index) => {
+            if index.is_empty() || !index.chars().all(|ch| ch.is_ascii_digit()) {
+                return Err(nom::Err::Error(nom::error::Error::new(
+                    input,
+                    nom::error::ErrorKind::Digit,
+                )));
+            }
+            Some(index.parse::<i32>().map_err(|_| {
+                nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit))
+            })?)
+        }
+        None => None,
+    };
+
+    Ok(SoundTarget {
+        name: name.to_string(),
+        index,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Modifier, PatternSource, Symbol};
+    use crate::model::{Modifier, PatternAtom, PatternSource, SoundTarget, Symbol};
 
     #[test]
     fn parses_bpm_assignment() {
@@ -189,8 +303,33 @@ mod tests {
         assert_eq!(program.layers.len(), 1);
         let layer = &program.layers[0];
         assert_eq!(layer.name, Symbol("bd".to_string()));
+        assert_eq!(
+            layer.default_target,
+            SoundTarget {
+                name: "bd".to_string(),
+                index: None
+            }
+        );
         assert_eq!(layer.pattern, PatternSource::ImplicitSelf);
         assert_eq!(layer.modifiers, vec![Modifier::Divide(4)]);
+    }
+
+    #[test]
+    fn parses_numeric_sample_name_in_header() {
+        let program = parse_program("[808bd] /4").expect("parse should succeed");
+        assert_eq!(program.layers[0].name, Symbol("808bd".to_string()));
+    }
+
+    #[test]
+    fn parses_header_sample_index() {
+        let program = parse_program("[bd:3] /4").expect("parse should succeed");
+        assert_eq!(
+            program.layers[0].default_target,
+            SoundTarget {
+                name: "bd".to_string(),
+                index: Some(3)
+            }
+        );
     }
 
     #[test]
@@ -208,6 +347,54 @@ mod tests {
         assert_eq!(
             program.layers[0].modifiers,
             vec![Modifier::Divide(2), Modifier::Shift(-0.5)]
+        );
+    }
+
+    #[test]
+    fn parses_effect_chain_modifiers() {
+        let program = parse_program("[hh] *8 .gain 0.6 .pan -0.3 .speed 1.25 .sustain 0.4")
+            .expect("parse should succeed");
+        assert_eq!(
+            program.layers[0].modifiers,
+            vec![
+                Modifier::Multiply(8),
+                Modifier::Gain(0.6),
+                Modifier::Pan(-0.3),
+                Modifier::Speed(1.25),
+                Modifier::Sustain(0.4),
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_cycle_pattern_body() {
+        let program = parse_program("[bd] <0 3 5 7> /1").expect("parse should succeed");
+        assert_eq!(
+            program.layers[0].pattern,
+            PatternSource::Cycle(vec![
+                PatternAtom::SampleIndex(0),
+                PatternAtom::SampleIndex(3),
+                PatternAtom::SampleIndex(5),
+                PatternAtom::SampleIndex(7),
+            ])
+        );
+    }
+
+    #[test]
+    fn parses_group_pattern_body() {
+        let program = parse_program("[drum] [bd sd:2] /1").expect("parse should succeed");
+        assert_eq!(
+            program.layers[0].pattern,
+            PatternSource::Group(vec![
+                PatternAtom::Sound(SoundTarget {
+                    name: "bd".to_string(),
+                    index: None,
+                }),
+                PatternAtom::Sound(SoundTarget {
+                    name: "sd".to_string(),
+                    index: Some(2),
+                }),
+            ])
         );
     }
 
@@ -240,7 +427,7 @@ mod tests {
 
     #[test]
     fn rejects_unknown_modifier_syntax() {
-        let error = parse_program("[hh] .gain 0.6").expect_err("parse should fail");
+        let error = parse_program("[hh] .room 0.6").expect_err("parse should fail");
         assert_eq!(error.line, 1);
     }
 }

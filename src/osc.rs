@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use rosc::{OscMessage, OscPacket, OscType, encoder};
 
-use crate::model::{Program, ScheduledEvent};
+use crate::model::{EventParams, Program, ScheduledEvent, SoundTarget};
 
 #[derive(Debug)]
 pub struct OscClient {
@@ -53,8 +53,8 @@ impl OscClient {
         for event in events {
             let target_offset = beat_to_duration(event.beat_pos, program.effective_bpm());
             sleep_until(target_offset, &mut current_offset);
-            let voice = voice_for_layer(&event.layer.0);
-            let packet = build_trigger_packet(&event.layer.0, voice);
+            let voice = voice_for_layer(&event.sound.name).with_params(event.params);
+            let packet = build_trigger_packet(&event.sound, voice);
             self.send(&packet)?;
         }
 
@@ -86,25 +86,31 @@ fn sleep_until(target_offset: Duration, current_offset: &mut Duration) {
     *current_offset = target_offset;
 }
 
-pub fn build_trigger_packet(sound_name: &str, voice: VoiceConfig) -> OscPacket {
+pub fn build_trigger_packet(sound: &SoundTarget, voice: VoiceConfig) -> OscPacket {
+    let mut args = vec![
+        OscType::String("s".to_string()),
+        OscType::String(sound.name.clone()),
+        OscType::String("gain".to_string()),
+        OscType::Float(voice.gain),
+        OscType::String("pan".to_string()),
+        OscType::Float(voice.pan),
+        OscType::String("freq".to_string()),
+        OscType::Float(voice.freq),
+        OscType::String("speed".to_string()),
+        OscType::Float(voice.speed),
+        OscType::String("sustain".to_string()),
+        OscType::Float(voice.sustain.as_secs_f32()),
+        OscType::String("orbit".to_string()),
+        OscType::Int(0),
+    ];
+
+    if let Some(index) = sound.index {
+        args.extend([OscType::String("n".to_string()), OscType::Int(index)]);
+    }
+
     OscPacket::Message(OscMessage {
         addr: "/dirt/play".to_string(),
-        args: vec![
-            OscType::String("s".to_string()),
-            OscType::String(sound_name.to_string()),
-            OscType::String("gain".to_string()),
-            OscType::Float(voice.gain),
-            OscType::String("pan".to_string()),
-            OscType::Float(voice.pan),
-            OscType::String("freq".to_string()),
-            OscType::Float(voice.freq),
-            OscType::String("speed".to_string()),
-            OscType::Float(voice.speed),
-            OscType::String("sustain".to_string()),
-            OscType::Float(voice.sustain.as_secs_f32()),
-            OscType::String("orbit".to_string()),
-            OscType::Int(0),
-        ],
+        args,
     })
 }
 
@@ -115,6 +121,21 @@ pub struct VoiceConfig {
     pan: f32,
     speed: f32,
     sustain: Duration,
+}
+
+impl VoiceConfig {
+    fn with_params(self, params: EventParams) -> Self {
+        Self {
+            gain: params.gain.unwrap_or(self.gain),
+            pan: params.pan.unwrap_or(self.pan),
+            speed: params.speed.unwrap_or(self.speed),
+            sustain: params
+                .sustain
+                .map(Duration::from_secs_f32)
+                .unwrap_or(self.sustain),
+            ..self
+        }
+    }
 }
 
 fn voice_for_layer(name: &str) -> VoiceConfig {
@@ -157,7 +178,13 @@ mod tests {
     #[test]
     fn builds_supercollider_trigger_message() {
         let voice = voice_for_layer("bd");
-        let packet = build_trigger_packet("bd", voice);
+        let packet = build_trigger_packet(
+            &SoundTarget {
+                name: "bd".to_string(),
+                index: None,
+            },
+            voice,
+        );
 
         let OscPacket::Message(message) = packet else {
             panic!("expected message packet");
@@ -196,5 +223,41 @@ mod tests {
         let voice = voice_for_layer("bass");
         assert_eq!(voice.gain, 0.8);
         assert_eq!(voice.freq, 440.0);
+    }
+
+    #[test]
+    fn applies_event_parameter_overrides() {
+        let voice = voice_for_layer("bd").with_params(EventParams {
+            gain: Some(0.4),
+            pan: Some(-0.5),
+            speed: Some(1.25),
+            sustain: None,
+        });
+        assert_eq!(voice.gain, 0.4);
+        assert_eq!(voice.pan, -0.5);
+        assert_eq!(voice.speed, 1.25);
+        assert_eq!(voice.freq, 55.0);
+    }
+
+    #[test]
+    fn includes_sample_index_when_present() {
+        let voice = voice_for_layer("bd");
+        let packet = build_trigger_packet(
+            &SoundTarget {
+                name: "bd".to_string(),
+                index: Some(3),
+            },
+            voice,
+        );
+
+        let OscPacket::Message(message) = packet else {
+            panic!("expected message packet");
+        };
+
+        assert!(
+            message
+                .args
+                .ends_with(&[OscType::String("n".to_string()), OscType::Int(3),])
+        );
     }
 }

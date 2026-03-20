@@ -44,6 +44,41 @@ fn run_prints_expected_schedule() {
 }
 
 #[test]
+fn sounds_lists_local_names_from_overrides() {
+    let root = temp_file_path("dir");
+    fs::create_dir(&root).expect("root dir should exist");
+    let samples_root = root.join("samples");
+    fs::create_dir(&samples_root).expect("samples root should exist");
+    fs::create_dir(samples_root.join("bd")).expect("bd sample should exist");
+    fs::create_dir(samples_root.join("808sd")).expect("808sd sample should exist");
+
+    let superdirt_root = root.join("SuperDirt");
+    let synths_dir = superdirt_root.join("synths");
+    fs::create_dir_all(&synths_dir).expect("synths dir should exist");
+    fs::write(
+        synths_dir.join("default-synths.scd"),
+        "SynthDef(\\superhat,{})\n~dirt.soundLibrary.addSynth(\\from, (play: {}));\n",
+    )
+    .expect("synth source should be written");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fin"))
+        .arg("sounds")
+        .env("FIN_DIRT_SAMPLES_ROOT", &samples_root)
+        .env("FIN_SUPERDIRT_ROOT", &superdirt_root)
+        .output()
+        .expect("command should run");
+
+    fs::remove_dir_all(&root).expect("should clean up temp tree");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("sample 808sd"));
+    assert!(stdout.contains("sample bd"));
+    assert!(stdout.contains("synth superhat"));
+    assert!(stdout.contains("synth from"));
+}
+
+#[test]
 fn run_prints_density_and_shifted_schedule() {
     let path = temp_file_path("metl");
     fs::write(&path, "bpm = 120\n[hh] *4 >> 0.25\n").expect("should write test file");
@@ -61,6 +96,72 @@ fn run_prints_density_and_shifted_schedule() {
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
         "bpm=120\nhh  beat=0.000  bar=0.000\nhh  beat=1.000  bar=0.250\nhh  beat=2.000  bar=0.500\nhh  beat=3.000  bar=0.750\n"
+    );
+}
+
+#[test]
+fn run_accepts_effect_chaining_syntax() {
+    let path = temp_file_path("metl");
+    fs::write(
+        &path,
+        "bpm = 120\n[hh] *4 .gain 0.5 .pan -0.25 .speed 1.5 .sustain 0.2\n",
+    )
+    .expect("should write test file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fin"))
+        .arg("run")
+        .arg("--no-play")
+        .arg(&path)
+        .output()
+        .expect("command should run");
+
+    fs::remove_file(&path).expect("should clean up temp file");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("hh  beat=0.000  bar=0.000"));
+    assert!(stdout.contains("hh  beat=3.000  bar=0.750"));
+}
+
+#[test]
+fn run_prints_sample_index_pattern_body() {
+    let path = temp_file_path("metl");
+    fs::write(&path, "bpm = 120\n[bd] <0 3 5 7> /1\n").expect("should write test file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fin"))
+        .arg("run")
+        .arg("--no-play")
+        .arg(&path)
+        .output()
+        .expect("command should run");
+
+    fs::remove_file(&path).expect("should clean up temp file");
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "bpm=120\nbd:0  beat=0.000  bar=0.000\n"
+    );
+}
+
+#[test]
+fn run_prints_group_pattern_body() {
+    let path = temp_file_path("metl");
+    fs::write(&path, "bpm = 120\n[drum] [bd sd:2] /1\n").expect("should write test file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fin"))
+        .arg("run")
+        .arg("--no-play")
+        .arg(&path)
+        .output()
+        .expect("command should run");
+
+    fs::remove_file(&path).expect("should clean up temp file");
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "bpm=120\nbd  beat=0.000  bar=0.000\nsd:2  beat=0.000  bar=0.000\n"
     );
 }
 

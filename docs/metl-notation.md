@@ -8,18 +8,21 @@ The current parser supports:
 
 - `bpm = <number>`
 - bare layer headers like `[bd]`
+- sample-index headers like `[bd:3]`
+- explicit pattern bodies with `<...>` and `[...]`
 - division with `/n`
 - density multiplication with `*n`
 - bar-relative offset with `<< n` and `>> n`
+- parameter chaining with `.gain`, `.pan`, `.speed`, and `.sustain`
 - line comments starting with `#`
 
 Example:
 
 ```ini
 bpm = 128
-[bd] /4
-[sd] /2 >> 0.25
-[hh] *8
+[bd] <0 3 5 7> /1
+[sd] /2 >> 0.25 .gain 0.8
+[hh] [hh hh:2] *4 .pan 0.2 .speed 1.1 .sustain 0.15
 ```
 
 Current semantics:
@@ -30,6 +33,10 @@ Current semantics:
 - `*n` multiplies the number of evenly spaced trigger slots in the bar
 - `>> n` shifts a layer later by `n` bars
 - `<< n` shifts a layer earlier by `n` bars
+- `.gain n` overrides the SuperDirt gain value for the layer
+- `.pan n` overrides the SuperDirt pan value for the layer
+- `.speed n` overrides the SuperDirt speed value for the layer
+- `.sustain n` overrides the SuperDirt sustain value for the layer
 - if `bpm` is omitted, playback defaults to `120`
 - runtime playback currently sends layer names directly to SuperDirt as sound names
 
@@ -44,6 +51,17 @@ Layer headers use square brackets:
 ```
 
 Today, a bare layer name is treated as an implicit self-triggering pattern source. There is no separate inline pattern body yet.
+
+Supported explicit pattern forms:
+
+- `<a b c>` cycles one item per bar
+- `[a b c]` triggers all listed items in the same slot
+
+Pattern atoms may be:
+
+- a sample index number like `3`, which becomes `n=3` on the current layer sound
+- a sound name like `bd` or `808sd`
+- a sound name with sample index like `sd:2`
 
 Runtime voice mapping today:
 
@@ -94,6 +112,21 @@ Interpretation in 4/4:
 - `<< 0.125` shifts events earlier by half a beat
 - wrapped events stay inside the current bar
 
+Effect-style parameters can be chained after timing operators.
+
+```ini
+[bd] /4 .gain 1.1
+[hh] *8 .pan 0.3 .speed 1.2
+[sd] /2 >> 0.25 .gain 0.8
+```
+
+Current supported parameters:
+
+- `.gain`
+- `.pan`
+- `.speed`
+- `.sustain`
+
 ## Comments
 
 Use `#` for comments:
@@ -110,15 +143,13 @@ The design target for METL still includes the following syntax, but it is not im
 ```ini
 [sd] >> 0.25
 [hh] *16 ~ 0.8 .gain 0.6
-[bass] <0 3 5 7> /1 .lpf 400
+[bass] /1 .lpf 400
 ```
 
 Planned operators:
 
 - `~ n` for probability
-- `.method value` for effect-style parameter chaining
-- `< >` for ordered cycles
-- `[ ]` for subdivisions inside a slot
+- other `.method value` chains beyond `.gain`, `.pan`, `.speed`, and `.sustain`
 
 ## Runtime Behavior Today
 
