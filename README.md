@@ -10,7 +10,8 @@ This repo currently supports:
 - printing one-bar schedules
 - sending OSC trigger messages to SuperDirt
 - using SuperDirt's sample library for drum playback
-- continuous bar-by-bar playback with bar-boundary reloads
+- continuous bar-by-bar playback with notify-based live reloads
+- managed background SuperDirt startup from `fin`
 
 Implemented METL subset:
 
@@ -173,8 +174,11 @@ fin watch --host 127.0.0.1 --port 57120 examples/basic.metl
 ```
 
 `watch` keeps the last good program loaded and re-reads the file at each bar boundary. If a new edit fails to parse, the previous good schedule keeps playing and the reload error is printed to stderr.
+`watch` and `dashboard` now use filesystem events via `notify` instead of polling file contents every bar. Saves are detected immediately and applied on the next bar boundary. If a new edit fails to parse, the previous good schedule keeps playing and the reload error is printed to stderr.
 
-`dashboard` runs the same bar-by-bar engine in an alternate-screen TUI with layer meters and recent logs. Press `q` to quit between bar updates.
+Playback timing uses monotonic deadlines for each event within the bar, which reduces drift compared with the earlier cumulative-sleep path.
+
+`dashboard` runs the same live-reload engine in an alternate-screen TUI with layer meters and recent logs. Press `q` to quit between bar updates.
 
 Current layer-to-sound mapping:
 

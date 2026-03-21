@@ -12,3 +12,4 @@ crossterm = "0.29.0"
 ratatui = "0.29.0"
 time = { version = "0.3.44", features = ["formatting", "local-offset"] }
 libc = "0.2.177"
+notify = "6.1.1"

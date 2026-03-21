@@ -17,6 +17,7 @@ use fin::parser::parse_program;
 use fin::scheduler::{format_events, schedule_bar};
 use fin::sounds::{format_sounds_report, load_sounds_report};
 use fin::supercollider::{StartMode, start_superdirt, stop_superdirt, superdirt_status};
+use fin::watcher::FileChangeWatcher;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use time::OffsetDateTime;
@@ -158,6 +159,7 @@ fn watch_file(
 ) -> Result<(), String> {
     ensure_metl_extension(&path)?;
     let mut loaded = load_track(&path)?;
+    let mut file_watcher = FileChangeWatcher::new(&path)?;
     let client = if no_play {
         None
     } else {
@@ -192,19 +194,26 @@ fn watch_file(
             return Ok(());
         }
 
-        match load_track(&path) {
-            Ok(next) => {
-                if next.source != loaded.source {
-                    println!("watch reload {}", path.display());
-                    print_schedule(&render_bar(&next.program, completed_bars)?.output);
-                    loaded = next;
+        let poll = file_watcher.poll();
+        for error in poll.errors {
+            eprintln!("watch error: {error}");
+        }
+
+        if poll.changed {
+            match load_track(file_watcher.watched_path()) {
+                Ok(next) => {
+                    if next.source != loaded.source {
+                        println!("watch reload {}", path.display());
+                        print_schedule(&render_bar(&next.program, completed_bars)?.output);
+                        loaded = next;
+                    }
+                    last_reload_error = None;
                 }
-                last_reload_error = None;
-            }
-            Err(error) => {
-                if last_reload_error.as_ref() != Some(&error) {
-                    eprintln!("watch reload failed: {error}");
-                    last_reload_error = Some(error);
+                Err(error) => {
+                    if last_reload_error.as_ref() != Some(&error) {
+                        eprintln!("watch reload failed: {error}");
+                        last_reload_error = Some(error);
+                    }
                 }
             }
         }
@@ -220,6 +229,7 @@ fn dashboard_file(
 ) -> Result<(), String> {
     ensure_metl_extension(&path)?;
     let mut loaded = load_track(&path)?;
+    let mut file_watcher = FileChangeWatcher::new(&path)?;
     let client = if no_play {
         None
     } else {
@@ -292,18 +302,25 @@ fn dashboard_file(
             return Ok(());
         }
 
-        match load_track(&path) {
-            Ok(next) => {
-                if next.source != loaded.source {
-                    push_log(&mut logs, "File changed. Re-parsing... DONE.".to_string());
-                    loaded = next;
+        let poll = file_watcher.poll();
+        for error in poll.errors {
+            push_log(&mut logs, format!("Watcher error: {error}"));
+        }
+
+        if poll.changed {
+            match load_track(file_watcher.watched_path()) {
+                Ok(next) => {
+                    if next.source != loaded.source {
+                        push_log(&mut logs, "File changed. Re-parsing... DONE.".to_string());
+                        loaded = next;
+                    }
+                    last_reload_error = None;
                 }
-                last_reload_error = None;
-            }
-            Err(error) => {
-                if last_reload_error.as_ref() != Some(&error) {
-                    push_log(&mut logs, format!("Reload failed: {error}"));
-                    last_reload_error = Some(error);
+                Err(error) => {
+                    if last_reload_error.as_ref() != Some(&error) {
+                        push_log(&mut logs, format!("Reload failed: {error}"));
+                        last_reload_error = Some(error);
+                    }
                 }
             }
         }

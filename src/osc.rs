@@ -2,7 +2,7 @@ use std::error::Error;
 use std::fmt;
 use std::net::{SocketAddr, UdpSocket};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rosc::{OscMessage, OscPacket, OscType, encoder};
 
@@ -47,18 +47,18 @@ impl OscClient {
     }
 
     pub fn play_bar(&self, program: &Program, events: &[ScheduledEvent]) -> Result<(), OscError> {
-        let mut current_offset = Duration::ZERO;
+        let start = Instant::now();
         let bar_duration = beat_to_duration(4.0, program.effective_bpm());
 
         for event in events {
             let target_offset = beat_to_duration(event.beat_pos, program.effective_bpm());
-            sleep_until(target_offset, &mut current_offset);
+            sleep_until(start + target_offset);
             let voice = voice_for_layer(&event.sound.name).with_params(event.params.clone());
             let packet = build_trigger_packet(&event.sound, voice);
             self.send(&packet)?;
         }
 
-        sleep_until(bar_duration, &mut current_offset);
+        sleep_until(start + bar_duration);
 
         Ok(())
     }
@@ -78,12 +78,20 @@ fn beat_to_duration(beat_pos: f32, bpm: f32) -> Duration {
     Duration::from_secs_f64(seconds)
 }
 
-fn sleep_until(target_offset: Duration, current_offset: &mut Duration) {
-    let wait = target_offset.saturating_sub(*current_offset);
-    if !wait.is_zero() {
-        thread::sleep(wait);
+fn sleep_until(deadline: Instant) {
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            break;
+        }
+
+        let remaining = deadline.saturating_duration_since(now);
+        if remaining > Duration::from_millis(2) {
+            thread::sleep(remaining - Duration::from_millis(1));
+        } else {
+            thread::yield_now();
+        }
     }
-    *current_offset = target_offset;
 }
 
 pub fn build_trigger_packet(sound: &SoundTarget, voice: VoiceConfig) -> OscPacket {

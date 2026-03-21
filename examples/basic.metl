@@ -3,7 +3,7 @@ bpm = 120
 [db] /4 >> 0.125
 [hh] *8 .gain 1.1
 # [bass] /4 >> 0.125 .speed 1.2
-[bass] [g5 bb5 g6 a5 a4 c5]
+[bass] [g5 bb5 d6 g6 a5 c6]
 [bass1] /2
 [808cy] /4 >> 0.125
 

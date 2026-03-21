@@ -5,3 +5,4 @@ pub mod parser;
 pub mod scheduler;
 pub mod sounds;
 pub mod supercollider;
+pub mod watcher;
