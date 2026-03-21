@@ -9,8 +9,11 @@ use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap};
 use crate::model::{
     Layer, Modifier, NoteValue, PatternAtom, PatternSource, Program, ScheduledEvent,
 };
+use crate::osc::event_gain;
 
 const METER_WIDTH: usize = 30;
+const TRANSPORT_WIDTH: usize = 32;
+const SCOPE_WIDTH: usize = 24;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DashboardState {
@@ -18,53 +21,111 @@ pub struct DashboardState {
     pub bpm: String,
     pub clip_percent: u8,
     pub osc_status: String,
+    pub watcher_status: String,
+    pub master_scope: String,
+    pub transport: TransportRow,
     pub layers: Vec<LayerRow>,
     pub logs: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DashboardRuntime {
+    pub osc_status: String,
+    pub watcher_status: String,
+    pub bar_index: usize,
+    pub bar_progress: f32,
+    pub pending_reload: bool,
+    pub master_scope: String,
+    pub layer_visuals: BTreeMap<String, LayerVisual>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransportRow {
+    pub label: String,
+    pub phase_bar: String,
+    pub playhead_bar: String,
+    pub hits: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayerVisual {
+    pub level: f32,
+    pub scope: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayerRow {
     pub label: String,
     pub meter: String,
+    pub scope: String,
+    pub hits: usize,
     pub detail: String,
 }
 
 pub fn build_dashboard_state(
     program: &Program,
     events: &[ScheduledEvent],
-    osc_status: impl Into<String>,
+    runtime: DashboardRuntime,
     logs: Vec<String>,
 ) -> DashboardState {
+    let clip_percent = estimate_clip_percent(events);
     DashboardState {
-        status: "RUNNING".to_string(),
+        status: if runtime.pending_reload {
+            "RELOAD PENDING".to_string()
+        } else {
+            "RUNNING".to_string()
+        },
         bpm: format_bpm(program),
-        clip_percent: 0,
-        osc_status: osc_status.into(),
-        layers: build_layer_rows(program, events),
+        clip_percent,
+        osc_status: runtime.osc_status,
+        watcher_status: runtime.watcher_status,
+        master_scope: runtime.master_scope,
+        transport: build_transport_row(runtime.bar_index, runtime.bar_progress, events),
+        layers: build_layer_rows(program, events, &runtime.layer_visuals),
         logs,
     }
 }
 
-pub fn build_layer_rows(program: &Program, events: &[ScheduledEvent]) -> Vec<LayerRow> {
+pub fn build_layer_rows(
+    program: &Program,
+    events: &[ScheduledEvent],
+    layer_visuals: &BTreeMap<String, LayerVisual>,
+) -> Vec<LayerRow> {
     let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut weighted_energy: BTreeMap<&str, f32> = BTreeMap::new();
     for event in events {
         *counts.entry(&event.layer.0).or_default() += 1;
+        *weighted_energy.entry(&event.layer.0).or_default() += event_gain(event);
     }
-    let max_events = counts.values().copied().max().unwrap_or(1) as f32;
+    let max_energy = weighted_energy
+        .values()
+        .copied()
+        .fold(0.0, f32::max)
+        .max(1.0);
 
     program
         .layers
         .iter()
         .map(|layer| {
-            let count = counts.get(layer.name.0.as_str()).copied().unwrap_or(0) as f32;
-            let ratio = if max_events > 0.0 {
-                count / max_events
+            let hits = counts.get(layer.name.0.as_str()).copied().unwrap_or(0);
+            let energy = weighted_energy
+                .get(layer.name.0.as_str())
+                .copied()
+                .unwrap_or(0.0);
+            let ratio = if max_energy > 0.0 {
+                energy / max_energy
             } else {
                 0.0
             };
+            let visual = layer_visuals
+                .get(layer.name.0.as_str())
+                .cloned()
+                .unwrap_or_else(empty_visual);
             LayerRow {
                 label: format!("[{}]", layer.name),
-                meter: meter_bar(ratio),
+                meter: meter_bar(ratio, visual.level, hits),
+                scope: visual.scope,
+                hits,
                 detail: layer_detail(layer),
             }
         })
@@ -86,6 +147,7 @@ pub fn render_dashboard(frame: &mut Frame<'_>, area: Rect, state: &DashboardStat
     frame.render_widget(outer, area);
 
     let sections = Layout::vertical([
+        Constraint::Length(3),
         Constraint::Length(2),
         Constraint::Min(8),
         Constraint::Min(6),
@@ -93,15 +155,33 @@ pub fn render_dashboard(frame: &mut Frame<'_>, area: Rect, state: &DashboardStat
     ])
     .split(inner);
 
-    let header = Paragraph::new(Line::from(format!(
-        "BPM: {} | CLIP: {}% | OSC: {}",
-        state.bpm, state.clip_percent, state.osc_status
-    )));
+    let header = Paragraph::new(vec![
+        Line::from(format!(
+            "BPM: {} | CLIP: {}% | OSC: {}",
+            state.bpm, state.clip_percent, state.osc_status
+        )),
+        Line::from(format!(
+            "WATCH: {} | MASTER {} {}",
+            state.watcher_status, state.master_scope, state.transport.playhead_bar
+        )),
+    ]);
     frame.render_widget(header, sections[0]);
 
-    render_layers(frame, sections[1], &state.layers);
-    render_logs(frame, sections[2], &state.logs);
-    frame.render_widget(Paragraph::new("q quit"), sections[3]);
+    render_transport(frame, sections[1], &state.transport);
+    render_layers(frame, sections[2], &state.layers);
+    render_logs(frame, sections[3], &state.logs);
+    frame.render_widget(Paragraph::new("q quit"), sections[4]);
+}
+
+fn render_transport(frame: &mut Frame<'_>, area: Rect, transport: &TransportRow) {
+    let block = Block::default().borders(Borders::TOP).title(" TRANSPORT ");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let line = Line::from(format!(
+        "{} | {} | {} | hits {}",
+        transport.label, transport.phase_bar, transport.playhead_bar, transport.hits
+    ));
+    frame.render_widget(Paragraph::new(line), inner);
 }
 
 fn render_layers(frame: &mut Frame<'_>, area: Rect, layers: &[LayerRow]) {
@@ -113,6 +193,8 @@ fn render_layers(frame: &mut Frame<'_>, area: Rect, layers: &[LayerRow]) {
         Row::new(vec![
             Cell::from(layer.label.clone()),
             Cell::from(layer.meter.clone()),
+            Cell::from(layer.scope.clone()),
+            Cell::from(format!("{:>3}", layer.hits)),
             Cell::from(layer.detail.clone()),
         ])
     });
@@ -122,6 +204,8 @@ fn render_layers(frame: &mut Frame<'_>, area: Rect, layers: &[LayerRow]) {
         [
             Constraint::Length(12),
             Constraint::Length((METER_WIDTH + 2) as u16),
+            Constraint::Length((SCOPE_WIDTH + 2) as u16),
+            Constraint::Length(5),
             Constraint::Min(10),
         ],
     );
@@ -140,12 +224,84 @@ fn render_logs(frame: &mut Frame<'_>, area: Rect, logs: &[String]) {
     frame.render_widget(paragraph, inner);
 }
 
-fn meter_bar(ratio: f32) -> String {
+fn meter_bar(ratio: f32, live_level: f32, hits: usize) -> String {
     let filled = (ratio.clamp(0.0, 1.0) * METER_WIDTH as f32).round() as usize;
+    let peak = (live_level.clamp(0.0, 1.0) * METER_WIDTH as f32).round() as usize;
     let mut meter = String::with_capacity(METER_WIDTH);
-    meter.push_str(&"|".repeat(filled));
-    meter.push_str(&" ".repeat(METER_WIDTH.saturating_sub(filled)));
+    let accent = match hits {
+        0 => ' ',
+        1..=2 => '.',
+        3..=4 => ':',
+        5..=8 => '=',
+        _ => '#',
+    };
+    for index in 0..METER_WIDTH {
+        let ch = if index < filled && index < peak {
+            '#'
+        } else if index < peak {
+            '|'
+        } else if index < filled {
+            accent
+        } else {
+            ' '
+        };
+        meter.push(ch);
+    }
     meter
+}
+
+fn build_transport_row(
+    bar_index: usize,
+    bar_progress: f32,
+    events: &[ScheduledEvent],
+) -> TransportRow {
+    let mut cells = vec!['.'; TRANSPORT_WIDTH];
+    for event in events {
+        let index = ((event.bar_pos.clamp(0.0, 0.999_9)) * TRANSPORT_WIDTH as f32).floor() as usize;
+        let cell = cells
+            .get_mut(index.min(TRANSPORT_WIDTH - 1))
+            .expect("index should be in range");
+        *cell = match *cell {
+            '.' => ':',
+            ':' => '=',
+            '=' => '#',
+            '#' => '#',
+            _ => '#',
+        };
+    }
+    let mut playhead = vec![' '; TRANSPORT_WIDTH];
+    let playhead_index =
+        ((bar_progress.clamp(0.0, 0.999_9)) * TRANSPORT_WIDTH as f32).floor() as usize;
+    playhead[playhead_index.min(TRANSPORT_WIDTH - 1)] = '^';
+
+    TransportRow {
+        label: format!("BAR {:03}", bar_index + 1),
+        phase_bar: format!("[{}]", cells.into_iter().collect::<String>()),
+        playhead_bar: format!("[{}]", playhead.into_iter().collect::<String>()),
+        hits: events.len(),
+    }
+}
+
+fn estimate_clip_percent(events: &[ScheduledEvent]) -> u8 {
+    let mut peaks: BTreeMap<i32, f32> = BTreeMap::new();
+    for event in events {
+        let slot = (event.bar_pos * 1000.0).round() as i32;
+        *peaks.entry(slot).or_default() += event_gain(event);
+    }
+
+    let max_peak = peaks.values().copied().fold(0.0, f32::max);
+    if max_peak <= 1.0 {
+        0
+    } else {
+        ((max_peak - 1.0) * 100.0).round().clamp(0.0, 100.0) as u8
+    }
+}
+
+fn empty_visual() -> LayerVisual {
+    LayerVisual {
+        level: 0.0,
+        scope: " ".repeat(SCOPE_WIDTH),
+    }
 }
 
 fn layer_detail(layer: &Layer) -> String {
@@ -280,9 +436,10 @@ mod tests {
             },
         ];
 
-        let rows = build_layer_rows(&program, &events);
+        let rows = build_layer_rows(&program, &events, &BTreeMap::new());
         assert_eq!(rows[0].label, "[fin]");
         assert!(rows[0].detail.contains("/4"));
+        assert_eq!(rows[0].hits, 1);
         assert!(rows[1].meter.len() == METER_WIDTH);
     }
 
@@ -341,5 +498,62 @@ mod tests {
         let detail = layer_detail(&layer);
         assert!(detail.contains("[g4 a4]"));
         assert!(detail.contains("/1"));
+    }
+
+    #[test]
+    fn transport_row_marks_event_positions() {
+        let transport = build_transport_row(
+            2,
+            0.5,
+            &[ScheduledEvent {
+                layer: Symbol("bd".to_string()),
+                sound: SoundTarget {
+                    name: "bd".to_string(),
+                    index: None,
+                },
+                bar_pos: 0.5,
+                beat_pos: 2.0,
+                params: EventParams::default(),
+            }],
+        );
+
+        assert_eq!(transport.label, "BAR 003");
+        assert!(transport.phase_bar.contains(':'));
+        assert!(transport.playhead_bar.contains('^'));
+        assert_eq!(transport.hits, 1);
+    }
+
+    #[test]
+    fn clip_percent_estimates_overlap_risk() {
+        let clip = estimate_clip_percent(&[
+            ScheduledEvent {
+                layer: Symbol("bd".to_string()),
+                sound: SoundTarget {
+                    name: "bd".to_string(),
+                    index: None,
+                },
+                bar_pos: 0.0,
+                beat_pos: 0.0,
+                params: EventParams {
+                    gain: Some(0.8),
+                    ..EventParams::default()
+                },
+            },
+            ScheduledEvent {
+                layer: Symbol("sd".to_string()),
+                sound: SoundTarget {
+                    name: "sd".to_string(),
+                    index: None,
+                },
+                bar_pos: 0.0,
+                beat_pos: 0.0,
+                params: EventParams {
+                    gain: Some(0.6),
+                    ..EventParams::default()
+                },
+            },
+        ]);
+
+        assert_eq!(clip, 40);
     }
 }

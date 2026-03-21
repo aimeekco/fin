@@ -179,6 +179,7 @@ fin watch --host 127.0.0.1 --port 57120 examples/basic.metl
 Playback timing uses monotonic deadlines for each event within the bar, which reduces drift compared with the earlier cumulative-sleep path.
 
 `dashboard` runs the same live-reload engine in an alternate-screen TUI with layer meters and recent logs. Press `q` to quit between bar updates.
+The dashboard now also shows transport phase for the current bar, per-layer hit counts, watcher status, a simple clip-risk estimate based on simultaneous event gain, and live ASCII scopes driven by scheduled trigger activity during playback.
 
 Current layer-to-sound mapping:
 

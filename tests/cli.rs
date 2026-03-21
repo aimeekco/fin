@@ -291,7 +291,7 @@ fn superdirt_background_lifecycle_commands_work() {
     assert!(status_stdout.contains("57129"));
 
     let log_path = state_dir.join("superdirt.log");
-    let log_contents = fs::read_to_string(&log_path).expect("log should exist");
+    let log_contents = wait_for_log_contents(&log_path);
     assert!(log_contents.contains("fake-sclang"));
     assert!(log_contents.contains("57129"));
 
@@ -316,6 +316,19 @@ fn superdirt_background_lifecycle_commands_work() {
 
     assert!(stopped.status.success());
     assert!(String::from_utf8_lossy(&stopped.stdout).contains("SuperDirt is not running"));
+}
+
+fn wait_for_log_contents(path: &PathBuf) -> String {
+    for _ in 0..20 {
+        if let Ok(contents) = fs::read_to_string(path) {
+            if contents.contains("fake-sclang") {
+                return contents;
+            }
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    fs::read_to_string(path).expect("log should exist")
 }
 
 #[test]

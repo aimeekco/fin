@@ -53,14 +53,18 @@ impl OscClient {
         for event in events {
             let target_offset = beat_to_duration(event.beat_pos, program.effective_bpm());
             sleep_until(start + target_offset);
-            let voice = voice_for_layer(&event.sound.name).with_params(event.params.clone());
-            let packet = build_trigger_packet(&event.sound, voice);
-            self.send(&packet)?;
+            self.play_event(event)?;
         }
 
         sleep_until(start + bar_duration);
 
         Ok(())
+    }
+
+    pub fn play_event(&self, event: &ScheduledEvent) -> Result<(), OscError> {
+        let voice = voice_for_layer(&event.sound.name).with_params(event.params.clone());
+        let packet = build_trigger_packet(&event.sound, voice);
+        self.send(&packet)
     }
 
     fn send(&self, packet: &OscPacket) -> Result<(), OscError> {
@@ -71,6 +75,14 @@ impl OscClient {
             .map_err(|error| OscError::new(format!("failed to send OSC packet: {error}")))?;
         Ok(())
     }
+}
+
+pub fn event_gain(event: &ScheduledEvent) -> f32 {
+    event
+        .params
+        .gain
+        .unwrap_or_else(|| voice_for_layer(&event.sound.name).gain)
+        .max(0.0)
 }
 
 fn beat_to_duration(beat_pos: f32, bpm: f32) -> Duration {
