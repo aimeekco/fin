@@ -16,13 +16,15 @@ This repo currently supports:
 Implemented METL subset:
 
 - `bpm = <number>`
+- `bars = <positive integer>`
 - `[layer]`
 - `[layer:index]`
-- note sequences like `[g4 a4 a3 c3]`
-- explicit pattern bodies with `<...>` and `[...]`
-- `/n`
-- `*n`
-- `<< n` and `>> n`
+- indented `[barN]` entries under each layer
+- sequence patterns like `<g4 a4 a3 c3>` and `<0 3 5 7>`
+- grouped sound patterns like `[bd sd:2]`
+- bar-local `/n`
+- bar-local `*n`
+- bar-local `<< n` and `>> n`
 - `.gain <number>`
 - `.pan <number>`
 - `.speed <number>`
@@ -194,10 +196,21 @@ Current layer-to-sound mapping:
 
 ```ini
 bpm = 128
-[bass] [g4 a4 a3 c3]
-[bd] <0 3 5 7> /1
-[sd] /2 >> 0.25 .gain 0.8
-[hh] [hh hh:2] *4 .pan 0.2 .speed 1.1 .sustain 0.15
+bars = 4
+
+[bass] .sustain 0.2
+  [bar1] /1 <g4 a4 a3 c3>
+  [bar2] /1 <a4 c5 e5 c5>
+
+[bd]
+  [bar1] /4 <0 3 5 7>
+  [bar2] /4 <0 0 5 7>
+
+[sd] .gain 0.8
+  [bar1] /2 >> 0.25
+
+[hh] .pan 0.2 .speed 1.1 .sustain 0.15
+  [bar1] *4 [hh hh:2]
 ```
 
 ## Documentation

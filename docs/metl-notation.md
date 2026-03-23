@@ -1,141 +1,145 @@
 # METL Notation
 
-METL is a layer-based live-coding language. Each layer is introduced by a header, and all layers are active at the same time.
+METL is a layer-based live-coding language with a global phrase length and per-layer bar overrides.
 
 ## Current Implemented Subset
 
 The current parser supports:
 
 - `bpm = <number>`
-- bare layer headers like `[bd]`
-- sample-index headers like `[bd:3]`
-- note sequences like `[g4 a4 a3 c3]`
-- explicit pattern bodies with `<...>` and `[...]`
-- division with `/n`
-- density multiplication with `*n`
-- bar-relative offset with `<< n` and `>> n`
-- parameter chaining with `.gain`, `.pan`, `.speed`, and `.sustain`
+- `bars = <positive integer>` with a default of `4`
+- layer headers like `[bd]` and `[sd:2]`
+- optional layer-wide effect params: `.gain`, `.pan`, `.speed`, `.sustain`
+- indented per-bar entries like `[bar1]`
+- bar-local timing operators: `/n`, `*n`, `<< n`, `>> n`
+- atom patterns like `hh` or `sd:2`
+- grouped sound patterns like `[bd sd:2]`
+- sequence patterns like `<0 3 5 7>` and `<g4 a4 a3 c3>`
 - line comments starting with `#`
 
 Example:
 
 ```ini
 bpm = 128
-[bass] [g4 a4 a3 c3]
-[bd] <0 3 5 7> /1
-[sd] /2 >> 0.25 .gain 0.8
-[hh] [hh hh:2] *4 .pan 0.2 .speed 1.1 .sustain 0.15
+bars = 4
+
+[bass] .sustain 0.2
+  [bar1] /1 <g4 a4 a3 c3>
+  [bar2] /1 <a4 c5 e5 c5>
+
+[bd]
+  [bar1] /4 <0 3 5 7>
+  [bar2] /4 <0 0 5 7>
+
+[sd] .gain 0.8
+  [bar1] /2 >> 0.25
+
+[hh] .pan 0.2
+  [bar1] *4 [hh hh:2]
 ```
 
-Current semantics:
+## File Structure
 
-- `[bd] /4` means "trigger `bd` four times across one 4/4 bar"
-- `/4` produces beat positions `0, 1, 2, 3`
-- `/2` produces beat positions `0, 2`
-- `*n` multiplies the number of evenly spaced trigger slots in the bar
-- `>> n` shifts a layer later by `n` bars
-- `<< n` shifts a layer earlier by `n` bars
-- `.gain n` overrides the SuperDirt gain value for the layer
-- `.pan n` overrides the SuperDirt pan value for the layer
-- `.speed n` overrides the SuperDirt speed value for the layer
-- `.sustain n` overrides the SuperDirt sustain value for the layer
-- if `bpm` is omitted, playback defaults to `120`
-- runtime playback currently sends layer names directly to SuperDirt as sound names
+Top-level assignments:
 
-## Layer Model
+```ini
+bpm = 128
+bars = 4
+```
 
-Layer headers use square brackets:
+- `bpm` defaults to `120` when omitted
+- `bars` defaults to `4` when omitted
+
+Layers are declared first, then given one or more indented bar definitions:
 
 ```ini
 [bd]
-[sd]
-[bass]
+  [bar1] /4 <0 3 5 7>
+  [bar2] /2 <0 5>
 ```
 
-Today, a bare layer name is treated as an implicit self-triggering pattern source. There is no separate inline pattern body yet.
+- `[bd]` declares the layer and its default sound target
+- `[bar1]` and `[bar2]` define the pattern for those bars in the phrase
+- if a layer omits a bar, that layer is silent on that bar
+- after the last bar, the phrase loops back to `bar1`
 
-Supported explicit pattern forms:
+## Pattern Forms
 
-- `<a b c>` cycles one item per bar
-- `[a b c]` triggers all listed items in the same slot
-- `[g4 a4 a3 c3]` on a pitched layer subdivides the slot into note events
+Patterns live on the `[barN]` line.
 
-Pattern atoms may be:
+Atom patterns:
 
-- a sample index number like `3`, which becomes `n=3` on the current layer sound
-- a sound name like `bd` or `808sd`
-- a sound name with sample index like `sd:2`
+```ini
+[hh]
+  [bar1] /8 hh
+```
 
-Note sequences:
+Group patterns trigger multiple sounds in the same slot:
 
-- note names use letter names plus octave, for example `c3`, `g4`, `fs4`, `bf2`
-- note values are sent to SuperDirt as `note`
-- a note sequence with no `/n` divides the whole bar evenly across the listed notes
-- with `/n`, the note sequence subdivides each slot produced by the timing operators
+```ini
+[drum]
+  [bar1] /1 [bd sd:2]
+```
 
-Runtime voice mapping today:
+Sequence patterns use angle brackets:
+
+```ini
+[bd]
+  [bar1] /4 <0 3 5 7>
+
+[bass]
+  [bar1] /1 <g4 a4 a3 c3>
+```
+
+- numeric sequence values become sample indices on the current layer sound
+- sound names like `hh` or `sd:2` override the layer sound for that step
+- note names like `g4`, `bf3`, and `cs5` are sent as SuperDirt `note` values
+
+Sequence semantics:
+
+- atom sequences step across the bar-local slots produced by `/n` and `*n`
+- note sequences subdivide each slot evenly across the listed notes
+
+## Timing Operators
+
+Timing operators are bar-local. They belong on `[barN]`, not on the layer header.
+
+```ini
+[bd]
+  [bar1] /4 <0 3 5 7>
+
+[hh]
+  [bar1] *8 hh
+
+[sd]
+  [bar1] /2 >> 0.25
+```
+
+- `/n` divides the bar into `n` evenly spaced trigger slots
+- `*n` multiplies the slot density
+- `>> n` shifts later within the bar with wraparound
+- `<< n` shifts earlier within the bar with wraparound
+
+Layer-wide effect params still live on the layer line:
+
+```ini
+[hh] .gain 0.6 .pan 0.2 .speed 1.1 .sustain 0.15
+  [bar1] *8 hh
+```
+
+Bar-level effect params can override the layer defaults:
+
+```ini
+[sd] .gain 0.7
+  [bar1] /2 >> 0.25 .gain 0.9
+```
+
+## Runtime Voice Mapping
 
 - `bd` plays the SuperDirt `bd` sound
 - `sd` plays the SuperDirt `sd` sound
 - `hh` plays the SuperDirt `hh` sound
-- unknown symbols are sent through unchanged so they can target other SuperDirt sounds
-
-## Timing Operator
-
-`/n` divides the bar into `n` evenly spaced trigger slots.
-
-```ini
-[bd] /4
-[hh] /8
-[bass] /1
-```
-
-Interpretation in 4/4:
-
-- `/1` means one trigger at the start of the bar
-- `/2` means two triggers, halfway apart
-- `/4` means quarter-note triggers
-- `/8` means eighth-note triggers
-
-`*n` multiplies the density of those trigger slots.
-
-```ini
-[hh] *4
-[bd] /2 *2
-```
-
-Interpretation in 4/4:
-
-- `*4` on its own produces four evenly spaced events in the bar
-- `/2 *2` produces four events because the two-slot pattern is doubled in density
-
-`>> n` and `<< n` shift an entire layer within the bar with wraparound.
-
-```ini
-[sd] /2 >> 0.25
-[hh] *4 << 0.125
-```
-
-Interpretation in 4/4:
-
-- `>> 0.25` shifts events later by one beat
-- `<< 0.125` shifts events earlier by half a beat
-- wrapped events stay inside the current bar
-
-Effect-style parameters can be chained after timing operators.
-
-```ini
-[bd] /4 .gain 1.1
-[hh] *8 .pan 0.3 .speed 1.2
-[sd] /2 >> 0.25 .gain 0.8
-```
-
-Current supported parameters:
-
-- `.gain`
-- `.pan`
-- `.speed`
-- `.sustain`
+- unknown symbols are sent through unchanged
 
 ## Comments
 
@@ -143,36 +147,21 @@ Use `#` for comments:
 
 ```ini
 bpm = 128
-[bd] /4 # kick drum on quarter notes
+[bd]
+  [bar1] /4 <0 3 5 7> # kick on quarter notes
 ```
-
-## Planned Syntax
-
-The design target for METL still includes the following syntax, but it is not implemented yet:
-
-```ini
-[sd] >> 0.25
-[hh] *16 ~ 0.8 .gain 0.6
-[bass] /1 .lpf 400
-```
-
-Planned operators:
-
-- `~ n` for probability
-- other `.method value` chains beyond `.gain`, `.pan`, `.speed`, and `.sustain`
 
 ## Runtime Behavior Today
 
 `fin run file.metl`:
 
 - parses one file
-- prints one bar of scheduled events
+- renders the current bar
 - optionally plays one bar through SuperCollider
 
 `fin watch file.metl`:
 
 - loads the file
 - plays continuously bar by bar
-- re-reads the file at the end of each bar
-- applies valid changes on the next bar boundary
+- applies valid edits on the next bar boundary
 - keeps the last good schedule if a reload fails

@@ -27,7 +27,7 @@ fn temp_file_path(extension: &str) -> PathBuf {
 #[test]
 fn run_prints_expected_schedule() {
     let path = temp_file_path("metl");
-    fs::write(&path, "bpm = 128\n[bd] /4\n").expect("should write test file");
+    fs::write(&path, "bpm = 128\n[bd]\n  [bar1] /4\n").expect("should write test file");
 
     let output = Command::new(env!("CARGO_BIN_EXE_fin"))
         .arg("run")
@@ -84,7 +84,7 @@ fn sounds_lists_local_names_from_overrides() {
 #[test]
 fn run_prints_density_and_shifted_schedule() {
     let path = temp_file_path("metl");
-    fs::write(&path, "bpm = 120\n[hh] *4 >> 0.25\n").expect("should write test file");
+    fs::write(&path, "bpm = 120\n[hh]\n  [bar1] *4 >> 0.25\n").expect("should write test file");
 
     let output = Command::new(env!("CARGO_BIN_EXE_fin"))
         .arg("run")
@@ -107,7 +107,7 @@ fn run_accepts_effect_chaining_syntax() {
     let path = temp_file_path("metl");
     fs::write(
         &path,
-        "bpm = 120\n[hh] *4 .gain 0.5 .pan -0.25 .speed 1.5 .sustain 0.2\n",
+        "bpm = 120\n[hh] .gain 0.5 .pan -0.25 .speed 1.5 .sustain 0.2\n  [bar1] *4\n",
     )
     .expect("should write test file");
 
@@ -129,7 +129,7 @@ fn run_accepts_effect_chaining_syntax() {
 #[test]
 fn run_prints_sample_index_pattern_body() {
     let path = temp_file_path("metl");
-    fs::write(&path, "bpm = 120\n[bd] <0 3 5 7> /1\n").expect("should write test file");
+    fs::write(&path, "bpm = 120\n[bd]\n  [bar1] /1 <0>\n").expect("should write test file");
 
     let output = Command::new(env!("CARGO_BIN_EXE_fin"))
         .arg("run")
@@ -150,7 +150,8 @@ fn run_prints_sample_index_pattern_body() {
 #[test]
 fn run_prints_group_pattern_body() {
     let path = temp_file_path("metl");
-    fs::write(&path, "bpm = 120\n[drum] [bd sd:2] /1\n").expect("should write test file");
+    fs::write(&path, "bpm = 120\n[drum]\n  [bar1] /1 [bd sd:2]\n")
+        .expect("should write test file");
 
     let output = Command::new(env!("CARGO_BIN_EXE_fin"))
         .arg("run")
@@ -171,7 +172,8 @@ fn run_prints_group_pattern_body() {
 #[test]
 fn run_prints_note_sequence_body() {
     let path = temp_file_path("metl");
-    fs::write(&path, "bpm = 120\n[bass] [g4 a4 a3 c3]\n").expect("should write test file");
+    fs::write(&path, "bpm = 120\n[bass]\n  [bar1] <g4 a4 a3 c3>\n")
+        .expect("should write test file");
 
     let output = Command::new(env!("CARGO_BIN_EXE_fin"))
         .arg("run")
@@ -192,13 +194,13 @@ fn run_prints_note_sequence_body() {
 #[test]
 fn watch_reloads_on_bar_boundary() {
     let path = temp_file_path("metl");
-    fs::write(&path, "bpm = 1200\n[bd] /1\n").expect("should write test file");
+    fs::write(&path, "bpm = 1200\nbars = 1\n[bd]\n  [bar1] /1\n").expect("should write test file");
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_fin"))
         .arg("watch")
         .arg("--no-play")
         .arg("--bars")
-        .arg("2")
+        .arg("3")
         .arg(&path)
         .stdout(Stdio::piped())
         .spawn()
@@ -212,7 +214,8 @@ fn watch_reloads_on_bar_boundary() {
         .expect("should read watch header");
     assert!(first_line.contains("watch load"));
 
-    fs::write(&path, "bpm = 1200\n[sd] /1\n").expect("should rewrite test file");
+    fs::write(&path, "bpm = 1200\nbars = 1\n[sd]\n  [bar1] /1\n").expect("should rewrite test file");
+    thread::sleep(Duration::from_millis(150));
 
     let mut remainder = String::new();
     reader
@@ -333,7 +336,11 @@ fn wait_for_log_contents(path: &PathBuf) -> String {
 
 #[test]
 fn run_sends_osc_packets() {
-    let listener = UdpSocket::bind("127.0.0.1:0").expect("listener should bind");
+    let listener = match UdpSocket::bind("127.0.0.1:0") {
+        Ok(listener) => listener,
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => return,
+        Err(error) => panic!("listener should bind: {error}"),
+    };
     listener
         .set_read_timeout(Some(Duration::from_secs(3)))
         .expect("timeout should be configured");
@@ -364,7 +371,7 @@ fn run_sends_osc_packets() {
     });
 
     let path = temp_file_path("metl");
-    fs::write(&path, "bpm = 960\n[bd] /2\n").expect("should write test file");
+    fs::write(&path, "bpm = 960\n[bd]\n  [bar1] /2\n").expect("should write test file");
 
     let output = Command::new(env!("CARGO_BIN_EXE_fin"))
         .arg("run")

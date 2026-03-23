@@ -1,6 +1,7 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::time::SystemTime;
 
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
@@ -10,12 +11,19 @@ pub struct FileChangeWatcher {
     receiver: Receiver<notify::Result<Event>>,
     target_path: PathBuf,
     target_name: Option<std::ffi::OsString>,
+    last_stamp: Option<FileStamp>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct WatchPoll {
     pub changed: bool,
     pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FileStamp {
+    modified: Option<SystemTime>,
+    len: u64,
 }
 
 impl FileChangeWatcher {
@@ -37,11 +45,14 @@ impl FileChangeWatcher {
             .watch(&watch_root, RecursiveMode::NonRecursive)
             .map_err(|error| format!("failed to watch {}: {error}", watch_root.display()))?;
 
+        let last_stamp = read_file_stamp(&absolute_target);
+
         Ok(Self {
             watcher,
             receiver,
             target_path: absolute_target,
             target_name,
+            last_stamp,
         })
     }
 
@@ -63,6 +74,12 @@ impl FileChangeWatcher {
                     break;
                 }
             }
+        }
+
+        let current_stamp = read_file_stamp(&self.target_path);
+        if current_stamp != self.last_stamp {
+            poll.changed = true;
+            self.last_stamp = current_stamp;
         }
 
         poll
@@ -115,6 +132,14 @@ fn path_matches_target(path: &Path, target_path: &Path, target_name: Option<&OsS
         (Some(path_name), Some(target_name)) => path_name == target_name,
         _ => false,
     }
+}
+
+fn read_file_stamp(path: &Path) -> Option<FileStamp> {
+    let metadata = std::fs::metadata(path).ok()?;
+    Some(FileStamp {
+        modified: metadata.modified().ok(),
+        len: metadata.len(),
+    })
 }
 
 #[cfg(test)]

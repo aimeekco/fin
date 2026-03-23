@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -12,6 +13,7 @@ impl fmt::Display for Symbol {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
     pub bpm: Option<f32>,
+    pub bars: Option<u32>,
     pub layers: Vec<Layer>,
 }
 
@@ -19,12 +21,23 @@ impl Program {
     pub fn effective_bpm(&self) -> f32 {
         self.bpm.unwrap_or(120.0)
     }
+
+    pub fn effective_bars(&self) -> u32 {
+        self.bars.unwrap_or(4)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layer {
     pub name: Symbol,
     pub default_target: SoundTarget,
+    pub modifiers: Vec<Modifier>,
+    pub bars: BTreeMap<u32, BarPattern>,
+    pub source_line: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BarPattern {
     pub pattern: PatternSource,
     pub modifiers: Vec<Modifier>,
     pub source_line: usize,
@@ -56,9 +69,14 @@ impl SoundTarget {
 pub enum PatternSource {
     ImplicitSelf,
     Atom(PatternAtom),
-    Cycle(Vec<PatternAtom>),
     Group(Vec<PatternAtom>),
-    NoteSequence(Vec<NoteValue>),
+    Sequence(Vec<PatternValue>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PatternValue {
+    Atom(PatternAtom),
+    Note(NoteValue),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

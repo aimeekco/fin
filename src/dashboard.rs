@@ -7,7 +7,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap};
 
 use crate::model::{
-    Layer, Modifier, NoteValue, PatternAtom, PatternSource, Program, ScheduledEvent,
+    BarPattern, Layer, Modifier, NoteValue, PatternAtom, PatternSource, PatternValue, Program,
+    ScheduledEvent,
 };
 use crate::osc::event_gain;
 
@@ -306,47 +307,30 @@ fn empty_visual() -> LayerVisual {
 
 fn layer_detail(layer: &Layer) -> String {
     let mut parts = Vec::new();
-    match &layer.pattern {
-        PatternSource::ImplicitSelf => {}
-        PatternSource::Atom(atom) => parts.push(atom_label(atom)),
-        PatternSource::Cycle(atoms) => {
-            parts.push(format!(
-                "<{}>",
-                atoms.iter().map(atom_label).collect::<Vec<_>>().join(" ")
-            ));
-        }
-        PatternSource::Group(atoms) => {
-            parts.push(format!(
-                "[{}]",
-                atoms.iter().map(atom_label).collect::<Vec<_>>().join(" ")
-            ));
-        }
-        PatternSource::NoteSequence(notes) => {
-            parts.push(format!(
-                "[{}]",
-                notes.iter().map(note_label).collect::<Vec<_>>().join(" ")
-            ));
-        }
+
+    if !layer.modifiers.is_empty() {
+        parts.push(
+            layer
+                .modifiers
+                .iter()
+                .map(modifier_label)
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
     }
 
-    for modifier in &layer.modifiers {
-        match modifier {
-            Modifier::Divide(value) => parts.push(format!("/{value}")),
-            Modifier::Multiply(value) => parts.push(format!("*{value}")),
-            Modifier::Shift(value) if *value >= 0.0 => parts.push(format!(">> {:.3}", value)),
-            Modifier::Shift(value) => parts.push(format!("<< {:.3}", value.abs())),
-            Modifier::Gain(value) => parts.push(format!(".gain {:.2}", value)),
-            Modifier::Pan(value) => parts.push(format!(".pan {:.2}", value)),
-            Modifier::Speed(value) => parts.push(format!(".speed {:.2}", value)),
-            Modifier::Sustain(value) => parts.push(format!(".sustain {:.2}", value)),
-        }
-    }
-
-    if parts.is_empty() {
-        "/1".to_string()
+    if layer.bars.is_empty() {
+        parts.push("silent".to_string());
     } else {
-        parts.join(" ")
+        parts.extend(
+            layer
+                .bars
+                .iter()
+                .map(|(bar_index, pattern)| format!("bar{bar_index} {}", bar_pattern_label(pattern))),
+        );
     }
+
+    parts.join(" | ")
 }
 
 fn atom_label(atom: &PatternAtom) -> String {
@@ -360,6 +344,51 @@ fn note_label(note: &NoteValue) -> String {
     note.label.clone()
 }
 
+fn pattern_label(pattern: &PatternSource) -> String {
+    match pattern {
+        PatternSource::ImplicitSelf => "self".to_string(),
+        PatternSource::Atom(atom) => atom_label(atom),
+        PatternSource::Group(atoms) => format!(
+            "[{}]",
+            atoms.iter().map(atom_label).collect::<Vec<_>>().join(" ")
+        ),
+        PatternSource::Sequence(values) => format!(
+            "<{}>",
+            values
+                .iter()
+                .map(|value| match value {
+                    PatternValue::Atom(atom) => atom_label(atom),
+                    PatternValue::Note(note) => note_label(note),
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+    }
+}
+
+fn modifier_label(modifier: &Modifier) -> String {
+    match modifier {
+        Modifier::Divide(value) => format!("/{value}"),
+        Modifier::Multiply(value) => format!("*{value}"),
+        Modifier::Shift(value) if *value >= 0.0 => format!(">> {:.3}", value),
+        Modifier::Shift(value) => format!("<< {:.3}", value.abs()),
+        Modifier::Gain(value) => format!(".gain {:.2}", value),
+        Modifier::Pan(value) => format!(".pan {:.2}", value),
+        Modifier::Speed(value) => format!(".speed {:.2}", value),
+        Modifier::Sustain(value) => format!(".sustain {:.2}", value),
+    }
+}
+
+fn bar_pattern_label(pattern: &BarPattern) -> String {
+    let mut parts = pattern
+        .modifiers
+        .iter()
+        .map(modifier_label)
+        .collect::<Vec<_>>();
+    parts.push(pattern_label(&pattern.pattern));
+    parts.join(" ")
+}
+
 fn format_bpm(program: &Program) -> String {
     let bpm = program.effective_bpm();
     if bpm.fract() == 0.0 {
@@ -371,15 +400,27 @@ fn format_bpm(program: &Program) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::model::{
-        EventParams, Layer, NoteValue, PatternSource, Program, ScheduledEvent, SoundTarget, Symbol,
+        BarPattern, EventParams, Layer, NoteValue, PatternSource, PatternValue, Program,
+        ScheduledEvent, SoundTarget, Symbol,
     };
+
+    fn bar(pattern: PatternSource, modifiers: Vec<Modifier>) -> BarPattern {
+        BarPattern {
+            pattern,
+            modifiers,
+            source_line: 1,
+        }
+    }
 
     #[test]
     fn builds_layer_rows_with_density_bars() {
         let program = Program {
             bpm: Some(132.0),
+            bars: Some(4),
             layers: vec![
                 Layer {
                     name: Symbol("fin".to_string()),
@@ -387,8 +428,11 @@ mod tests {
                         name: "fin".to_string(),
                         index: None,
                     },
-                    pattern: PatternSource::ImplicitSelf,
-                    modifiers: vec![Modifier::Divide(4)],
+                    modifiers: vec![Modifier::Gain(0.8)],
+                    bars: BTreeMap::from([(
+                        1,
+                        bar(PatternSource::ImplicitSelf, vec![Modifier::Divide(4)]),
+                    )]),
                     source_line: 1,
                 },
                 Layer {
@@ -397,8 +441,11 @@ mod tests {
                         name: "splash".to_string(),
                         index: None,
                     },
-                    pattern: PatternSource::ImplicitSelf,
-                    modifiers: vec![Modifier::Multiply(16)],
+                    modifiers: Vec::new(),
+                    bars: BTreeMap::from([(
+                        2,
+                        bar(PatternSource::ImplicitSelf, vec![Modifier::Multiply(16)]),
+                    )]),
                     source_line: 2,
                 },
             ],
@@ -438,7 +485,7 @@ mod tests {
 
         let rows = build_layer_rows(&program, &events, &BTreeMap::new());
         assert_eq!(rows[0].label, "[fin]");
-        assert!(rows[0].detail.contains("/4"));
+        assert!(rows[0].detail.contains("bar1 /4 self"));
         assert_eq!(rows[0].hits, 1);
         assert!(rows[1].meter.len() == METER_WIDTH);
     }
@@ -451,26 +498,29 @@ mod tests {
                 name: "hh".to_string(),
                 index: None,
             },
-            pattern: PatternSource::Group(vec![
-                PatternAtom::Sound(SoundTarget {
-                    name: "hh".to_string(),
-                    index: None,
-                }),
-                PatternAtom::SampleIndex(2),
-            ]),
-            modifiers: vec![
-                Modifier::Multiply(4),
-                Modifier::Pan(0.2),
-                Modifier::Sustain(0.15),
-            ],
+            modifiers: vec![Modifier::Pan(0.2), Modifier::Sustain(0.15)],
+            bars: BTreeMap::from([(
+                1,
+                bar(
+                    PatternSource::Group(vec![
+                        PatternAtom::Sound(SoundTarget {
+                            name: "hh".to_string(),
+                            index: None,
+                        }),
+                        PatternAtom::SampleIndex(2),
+                    ]),
+                    vec![Modifier::Multiply(4)],
+                ),
+            )]),
             source_line: 1,
         };
 
         let detail = layer_detail(&layer);
-        assert!(detail.contains("[hh 2]"));
-        assert!(detail.contains("*4"));
         assert!(detail.contains(".pan 0.20"));
         assert!(detail.contains(".sustain 0.15"));
+        assert!(detail.contains("bar1"));
+        assert!(detail.contains("[hh 2]"));
+        assert!(detail.contains("*4"));
     }
 
     #[test]
@@ -481,22 +531,28 @@ mod tests {
                 name: "bass".to_string(),
                 index: None,
             },
-            pattern: PatternSource::NoteSequence(vec![
-                NoteValue {
-                    label: "g4".to_string(),
-                    semitone: -5.0,
-                },
-                NoteValue {
-                    label: "a4".to_string(),
-                    semitone: -3.0,
-                },
-            ]),
-            modifiers: vec![Modifier::Divide(1)],
+            modifiers: Vec::new(),
+            bars: BTreeMap::from([(
+                1,
+                bar(
+                    PatternSource::Sequence(vec![
+                        PatternValue::Note(NoteValue {
+                            label: "g4".to_string(),
+                            semitone: -5.0,
+                        }),
+                        PatternValue::Note(NoteValue {
+                            label: "a4".to_string(),
+                            semitone: -3.0,
+                        }),
+                    ]),
+                    vec![Modifier::Divide(1)],
+                ),
+            )]),
             source_line: 1,
         };
 
         let detail = layer_detail(&layer);
-        assert!(detail.contains("[g4 a4]"));
+        assert!(detail.contains("<g4 a4>"));
         assert!(detail.contains("/1"));
     }
 

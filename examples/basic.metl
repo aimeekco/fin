@@ -1,10 +1,38 @@
-bpm = 120
-[sd] /2 >> 0.75
-[db] /4 >> 0.125
-[hh] *8 .gain 1.1
-# [bass] /4 >> 0.125 .speed 1.2
-[bass] [g5 bb5 d6 g6 a5 c6]
-[bass1] /2
-[808cy] /4 >> 0.125
-[supersaw] [c5 g5 eb5 d5 c5 g5 eb5 d5]
+# bpm = 120
+# bars = 1
+# [sd]
+#   [bar1] /2 >> 0.75
+# [db]
+#   [bar1] /4 >> 0.125
+# [hh] .gain 1.1
+#   [bar1] *8
+# [bass] .speed 1.2
+#   [bar1] /4 >> 0.125
+# [bass]
+#   [bar1] <g5 bb5 d6 g6 a5 c6>
+# [bass1]
+#   [bar1] /2
+# [808cy]
+#   [bar1] /4 >> 0.125
 
+bpm = 240
+bars = 1
+
+[cyclo] .gain 0.8
+  [bar1] <d5 d5 f5 bb5 bb5 f5 a5 a5>
+# [superpiano] .sustain 1
+#   [bar1] <a2>
+[supersnare]
+  [bar1] <d2 f2>
+[808] .sustain 1
+  [bar1] <b2>
+[kd]
+  [bar1] /2 >> 0.25
+[808cy]
+  [bar1] /2
+[sd]
+  [bar1] /2 >> 0.25
+# [supersquare]
+#   [bar1] <bb3 a3 d3>
+# [bass]
+#   [bar1] <g5 bb5 d5 g6>
