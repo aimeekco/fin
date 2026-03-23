@@ -75,6 +75,8 @@ pub enum PatternSource {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PatternValue {
+    Hit,
+    Rest,
     Atom(PatternAtom),
     Note(NoteValue),
 }

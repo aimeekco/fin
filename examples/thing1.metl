@@ -1,0 +1,28 @@
+bpm = 240
+bars = 2
+
+[cyclo] .gain 0.8
+  [bar1] <d5 d5 f5 bb5 bb5 f5 a5 a5>
+  [bar2] <f5 f5 a5 d5 f5 a5 bb5 a5>
+# [superpiano] .sustain 1
+#   [bar1] <a2>
+[supersnare]
+  [bar1] <d2 f2>
+  [bar2] <d2 f2>
+[808] .sustain 1 .gain 1.1
+  [bar1] <b2>
+  [bar2] <d2>
+[kd]
+  [bar1] /2
+  [bar2] <0 5>
+[808cy]
+  [bar1] /2
+  [bar2] /2
+[hh] .gain 1.1
+  [bar1] /8
+  [bar2] /8
+[supersquare]
+  [bar1] <bb3 a3 d3>
+  [bar2] <a3 d3 bb3>
+# [bass]
+#   [bar1] <g5 bb5 d5 g6>

@@ -15,6 +15,7 @@ The current parser supports:
 - atom patterns like `hh` or `sd:2`
 - grouped sound patterns like `[bd sd:2]`
 - sequence patterns like `<0 3 5 7>` and `<g4 a4 a3 c3>`
+- compact hit/rest grids like `<xxxoxxxxxxxooxxxo>`
 - line comments starting with `#`
 
 Example:
@@ -89,11 +90,15 @@ Sequence patterns use angle brackets:
 
 [bass]
   [bar1] /1 <g4 a4 a3 c3>
+
+[bd]
+  [bar1] /16 <xxxoxxxxxxxooxxxo>
 ```
 
 - numeric sequence values become sample indices on the current layer sound
 - sound names like `hh` or `sd:2` override the layer sound for that step
 - note names like `g4`, `bf3`, and `cs5` are sent as SuperDirt `note` values
+- compact grids use `o` for a hit on the layer's default target and `x` for a rest
 
 Sequence semantics:
 

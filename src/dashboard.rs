@@ -357,6 +357,8 @@ fn pattern_label(pattern: &PatternSource) -> String {
             values
                 .iter()
                 .map(|value| match value {
+                    PatternValue::Hit => "o".to_string(),
+                    PatternValue::Rest => "x".to_string(),
                     PatternValue::Atom(atom) => atom_label(atom),
                     PatternValue::Note(note) => note_label(note),
                 })

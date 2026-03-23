@@ -5,9 +5,9 @@ use std::fmt;
 use nom::IResult;
 use nom::Parser;
 use nom::branch::alt;
-use nom::bytes::complete::{tag, take_till1, take_while1};
+use nom::bytes::complete::{tag, take_till1, take_until, take_while1};
 use nom::character::complete::{char, digit1, multispace0, multispace1, one_of, space0};
-use nom::combinator::{all_consuming, map, map_res, recognize};
+use nom::combinator::{all_consuming, map, map_res, recognize, verify};
 use nom::multi::{many0, separated_list1};
 use nom::number::complete::recognize_float;
 use nom::sequence::{delimited, preceded, separated_pair};
@@ -333,6 +333,34 @@ fn pattern_source(input: &str) -> IResult<&str, PatternSource> {
 }
 
 fn sequence_body(input: &str) -> IResult<&str, PatternSource> {
+    alt((sequence_grid_body, sequence_list_body)).parse(input)
+}
+
+fn sequence_grid_body(input: &str) -> IResult<&str, PatternSource> {
+    map(
+        delimited(
+            char('<'),
+            verify(take_until(">"), |content: &str| is_compact_grid(content)),
+            char('>'),
+        ),
+        |content: &str| {
+            PatternSource::Sequence(
+                content
+                    .chars()
+                    .filter(|ch| !ch.is_whitespace())
+                    .map(|ch| match ch {
+                        'o' | 'O' => PatternValue::Hit,
+                        'x' | 'X' | '_' | '-' => PatternValue::Rest,
+                        _ => unreachable!("grid parser validates characters"),
+                    })
+                    .collect(),
+            )
+        },
+    )
+    .parse(input)
+}
+
+fn sequence_list_body(input: &str) -> IResult<&str, PatternSource> {
     map(
         delimited(
             char('<'),
@@ -362,10 +390,20 @@ fn atom_body(input: &str) -> IResult<&str, PatternSource> {
 
 fn pattern_value(input: &str) -> IResult<&str, PatternValue> {
     alt((
+        map(hit_token, |_| PatternValue::Hit),
+        map(rest_token, |_| PatternValue::Rest),
         map(note_value, PatternValue::Note),
         map(pattern_atom, PatternValue::Atom),
     ))
     .parse(input)
+}
+
+fn hit_token(input: &str) -> IResult<&str, &str> {
+    tag("o").parse(input)
+}
+
+fn rest_token(input: &str) -> IResult<&str, &str> {
+    alt((tag("x"), tag("_"), tag("-"))).parse(input)
 }
 
 fn pattern_atom(input: &str) -> IResult<&str, PatternAtom> {
@@ -397,6 +435,17 @@ fn sound_target(input: &str) -> IResult<&str, SoundTarget> {
 
 fn token_value(input: &str) -> IResult<&str, &str> {
     take_till1(|c: char| c.is_whitespace() || matches!(c, '[' | ']' | '<' | '>')).parse(input)
+}
+
+fn is_compact_grid(content: &str) -> bool {
+    let mut saw_step = false;
+    for ch in content.chars().filter(|ch| !ch.is_whitespace()) {
+        if !matches!(ch, 'o' | 'O' | 'x' | 'X' | '_' | '-') {
+            return false;
+        }
+        saw_step = true;
+    }
+    saw_step
 }
 
 fn parse_sound_target_token(
@@ -547,6 +596,58 @@ mod tests {
             PatternSource::Sequence(values) => assert!(matches!(values[0], PatternValue::Note(_))),
             other => panic!("expected sequence, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_compact_hit_rest_grid_sequence() {
+        let program =
+            parse_program("[bd]\n  [bar1] /16 <xxxoxxxxxxxooxxxo>\n").expect("parse should succeed");
+        let bar = program.layers[0].bars.get(&1).expect("bar should exist");
+        assert_eq!(bar.modifiers, vec![Modifier::Divide(16)]);
+        assert_eq!(
+            bar.pattern,
+            PatternSource::Sequence(vec![
+                PatternValue::Rest,
+                PatternValue::Rest,
+                PatternValue::Rest,
+                PatternValue::Hit,
+                PatternValue::Rest,
+                PatternValue::Rest,
+                PatternValue::Rest,
+                PatternValue::Rest,
+                PatternValue::Rest,
+                PatternValue::Rest,
+                PatternValue::Rest,
+                PatternValue::Hit,
+                PatternValue::Hit,
+                PatternValue::Rest,
+                PatternValue::Rest,
+                PatternValue::Rest,
+                PatternValue::Hit,
+            ])
+        );
+    }
+
+    #[test]
+    fn parses_spaced_restful_note_sequence() {
+        let program =
+            parse_program("[bass]\n  [bar1] /1 <g4 x a4 x>\n").expect("parse should succeed");
+        let bar = program.layers[0].bars.get(&1).expect("bar should exist");
+        assert_eq!(
+            bar.pattern,
+            PatternSource::Sequence(vec![
+                PatternValue::Note(NoteValue {
+                    label: "g4".to_string(),
+                    semitone: -5.0,
+                }),
+                PatternValue::Rest,
+                PatternValue::Note(NoteValue {
+                    label: "a4".to_string(),
+                    semitone: -3.0,
+                }),
+                PatternValue::Rest,
+            ])
+        );
     }
 
     #[test]

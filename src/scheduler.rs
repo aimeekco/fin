@@ -2,8 +2,8 @@ use std::error::Error;
 use std::fmt;
 
 use crate::model::{
-    BarPattern, EventParams, Layer, Meter, Modifier, NoteValue, PatternAtom, PatternSource,
-    PatternValue, Program, ScheduledEvent, SoundTarget,
+    BarPattern, EventParams, Layer, Meter, Modifier, PatternAtom, PatternSource, PatternValue,
+    Program, ScheduledEvent, SoundTarget,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -194,18 +194,18 @@ fn schedule_sequence(
         return Err(ScheduleError::new("sequence pattern cannot be empty"));
     }
 
-    let all_notes = values.iter().all(|value| matches!(value, PatternValue::Note(_)));
-    let all_atoms = values.iter().all(|value| matches!(value, PatternValue::Atom(_)));
+    let all_notes = values
+        .iter()
+        .all(|value| matches!(value, PatternValue::Note(_) | PatternValue::Rest));
+    let all_atoms = values.iter().all(|value| {
+        matches!(
+            value,
+            PatternValue::Atom(_) | PatternValue::Hit | PatternValue::Rest
+        )
+    });
 
     if all_notes {
-        let notes: Vec<NoteValue> = values
-            .iter()
-            .map(|value| match value {
-                PatternValue::Note(note) => note.clone(),
-                PatternValue::Atom(_) => unreachable!("all values are notes"),
-            })
-            .collect();
-        return schedule_note_sequence(events, layer, &notes, slots, shift, params, meter);
+        return schedule_note_sequence(events, layer, values, slots, shift, params, meter);
     }
 
     if all_atoms {
@@ -213,13 +213,15 @@ fn schedule_sequence(
             let base_bar_pos = slot as f32 / slots as f32;
             let bar_pos = (base_bar_pos + shift).rem_euclid(1.0);
             let beat_pos = meter.beats_per_bar as f32 * bar_pos;
-            let atom = match &values[slot as usize % values.len()] {
-                PatternValue::Atom(atom) => atom,
+            let sound = match &values[slot as usize % values.len()] {
+                PatternValue::Hit => layer.default_target.clone(),
+                PatternValue::Rest => continue,
+                PatternValue::Atom(atom) => resolve_atom(atom, &layer.default_target)?,
                 PatternValue::Note(_) => unreachable!("all values are atoms"),
             };
             events.push(ScheduledEvent {
                 layer: layer.name.clone(),
-                sound: resolve_atom(atom, &layer.default_target)?,
+                sound,
                 bar_pos,
                 beat_pos,
                 params: params.clone(),
@@ -236,13 +238,13 @@ fn schedule_sequence(
 fn schedule_note_sequence(
     events: &mut Vec<ScheduledEvent>,
     layer: &Layer,
-    notes: &[NoteValue],
+    values: &[PatternValue],
     slots: u32,
     shift: f32,
     params: EventParams,
     meter: Meter,
 ) -> Result<(), ScheduleError> {
-    if notes.is_empty() {
+    if values.is_empty() {
         return Err(ScheduleError::new("note sequence cannot be empty"));
     }
 
@@ -250,10 +252,13 @@ fn schedule_note_sequence(
         let slot_start = slot as f32 / slots as f32;
         let slot_width = 1.0 / slots as f32;
 
-        for (index, note) in notes.iter().enumerate() {
-            let subdivision = index as f32 / notes.len() as f32;
+        for (index, value) in values.iter().enumerate() {
+            let subdivision = index as f32 / values.len() as f32;
             let bar_pos = (slot_start + subdivision * slot_width + shift).rem_euclid(1.0);
             let beat_pos = meter.beats_per_bar as f32 * bar_pos;
+            let PatternValue::Note(note) = value else {
+                continue;
+            };
             let mut note_params = params.clone();
             note_params.note = Some(note.semitone);
             note_params.note_label = Some(note.label.clone());
@@ -276,7 +281,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::model::{BarPattern, PatternValue, Program, SoundTarget, Symbol};
+    use crate::model::{BarPattern, NoteValue, PatternValue, Program, SoundTarget, Symbol};
 
     fn bar(pattern: PatternSource, modifiers: Vec<Modifier>) -> BarPattern {
         BarPattern {
@@ -358,6 +363,84 @@ mod tests {
         let events = schedule_bar(&program, Meter::default(), 0).expect("schedule should work");
         let beats: Vec<f32> = events.iter().map(|event| event.beat_pos).collect();
         assert_eq!(beats, vec![0.0, 2.0]);
+    }
+
+    #[test]
+    fn schedules_compact_hit_rest_grid() {
+        let program = Program {
+            bpm: Some(120.0),
+            bars: Some(1),
+            layers: vec![layer(
+                "bd",
+                &[(
+                    1,
+                    bar(
+                        PatternSource::Sequence(vec![
+                            PatternValue::Rest,
+                            PatternValue::Rest,
+                            PatternValue::Rest,
+                            PatternValue::Hit,
+                            PatternValue::Rest,
+                            PatternValue::Rest,
+                            PatternValue::Rest,
+                            PatternValue::Rest,
+                            PatternValue::Rest,
+                            PatternValue::Rest,
+                            PatternValue::Rest,
+                            PatternValue::Hit,
+                            PatternValue::Hit,
+                            PatternValue::Rest,
+                            PatternValue::Rest,
+                            PatternValue::Rest,
+                            PatternValue::Hit,
+                        ]),
+                        vec![Modifier::Divide(17)],
+                    ),
+                )],
+            )],
+        };
+
+        let events = schedule_bar(&program, Meter::default(), 0).expect("schedule should work");
+        let beats: Vec<f32> = events.iter().map(|event| event.beat_pos).collect();
+        assert_eq!(beats, vec![0.705_882_4, 2.588_235_4, 2.823_529_5, 3.764_706]);
+    }
+
+    #[test]
+    fn skips_rests_in_note_sequences_without_collapsing_timing() {
+        let program = Program {
+            bpm: Some(120.0),
+            bars: Some(1),
+            layers: vec![layer(
+                "bass",
+                &[(
+                    1,
+                    bar(
+                        PatternSource::Sequence(vec![
+                            PatternValue::Note(NoteValue {
+                                label: "g4".to_string(),
+                                semitone: -5.0,
+                            }),
+                            PatternValue::Rest,
+                            PatternValue::Note(NoteValue {
+                                label: "a4".to_string(),
+                                semitone: -3.0,
+                            }),
+                            PatternValue::Rest,
+                        ]),
+                        vec![Modifier::Divide(1)],
+                    ),
+                )],
+            )],
+        };
+
+        let events = schedule_bar(&program, Meter::default(), 0).expect("schedule should work");
+        let beats: Vec<f32> = events.iter().map(|event| event.beat_pos).collect();
+        let labels: Vec<String> = events
+            .iter()
+            .map(|event| event.params.note_label.clone().unwrap_or_default())
+            .collect();
+        assert_eq!(beats, vec![0.0, 2.0]);
+        assert_eq!(labels, vec!["g4", "a4"]);
     }
 
     #[test]

@@ -21,6 +21,7 @@ Implemented METL subset:
 - `[layer:index]`
 - indented `[barN]` entries under each layer
 - sequence patterns like `<g4 a4 a3 c3>` and `<0 3 5 7>`
+- compact hit/rest grids like `<xxxoxxxxxxxooxxxo>`
 - grouped sound patterns like `[bd sd:2]`
 - bar-local `/n`
 - bar-local `*n`
