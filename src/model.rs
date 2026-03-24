@@ -56,10 +56,15 @@ impl Layer {
             })
             .or_else(|| self.bars.get(&BarSelector::Default))
     }
+
+    pub fn intro_bar(&self) -> Option<&BarPattern> {
+        self.bars.get(&BarSelector::Intro)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BarSelector {
+    Intro,
     Default,
     Every(u32),
     Exact(u32),
@@ -68,6 +73,7 @@ pub enum BarSelector {
 impl BarSelector {
     pub fn header_label(&self) -> String {
         match self {
+            Self::Intro => "[intro]".to_string(),
             Self::Default => "[default]".to_string(),
             Self::Every(value) => format!("[bar%{value}]"),
             Self::Exact(value) => format!("[bar{value}]"),
@@ -76,6 +82,7 @@ impl BarSelector {
 
     pub fn detail_label(&self) -> String {
         match self {
+            Self::Intro => "[intro]".to_string(),
             Self::Default => "[default]".to_string(),
             Self::Every(value) => format!("[bar%{value}]"),
             Self::Exact(value) => format!("bar{value}"),

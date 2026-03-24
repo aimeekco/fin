@@ -212,6 +212,28 @@ fn run_accepts_default_bar_definition() {
 }
 
 #[test]
+fn run_plays_intro_before_initial_bar() {
+    let path = temp_file_path("metl");
+    fs::write(&path, "bpm = 120\nbars = 4\n[bd]\n  [intro] /1 <8>\n  [bar1] /1 <1>\n")
+        .expect("should write test file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fin"))
+        .arg("run")
+        .arg("--no-play")
+        .arg(&path)
+        .output()
+        .expect("command should run");
+
+    fs::remove_file(&path).expect("should clean up temp file");
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "bpm=120\nbars=4\nbd:8  beat=0.000  bar=0.000\nbpm=120\nbars=4\nbd:1  beat=0.000  bar=0.000\n"
+    );
+}
+
+#[test]
 fn run_accepts_periodic_bar_definition() {
     let path = temp_file_path("metl");
     fs::write(&path, "bpm = 120\nbars = 4\n[bd]\n  [bar%2] /1 <0>\n")

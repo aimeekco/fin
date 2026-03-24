@@ -19,6 +19,7 @@ Implemented METL subset:
 - `bars = <positive integer>`
 - `[layer]`
 - `[layer:index]`
+- indented `[intro]` entries under a layer for a one-time pre-roll bar before the loop starts
 - indented `[default]` entries under a layer as the per-layer fallback bar
 - indented `[bar%N]` entries under a layer for every `N`th phrase bar
 - indented `[barN]` entries under each layer

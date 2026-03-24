@@ -250,6 +250,7 @@ fn layer_header(input: &str) -> IResult<&str, SoundTarget> {
 
 fn bar_header(input: &str) -> IResult<&str, BarSelector> {
     alt((
+        map(tag("[intro]"), |_| BarSelector::Intro),
         map(tag("[default]"), |_| BarSelector::Default),
         map(
             delimited(tag("[bar%"), every_value, char(']')),
@@ -708,6 +709,17 @@ mod tests {
     }
 
     #[test]
+    fn parses_intro_bar_pattern() {
+        let program =
+            parse_program("[bd]\n  [intro] /4 <0 3 5 7>\n").expect("parse should succeed");
+        let bar = program.layers[0]
+            .bars
+            .get(&BarSelector::Intro)
+            .expect("intro bar should exist");
+        assert_eq!(bar.modifiers, vec![Modifier::Divide(4)]);
+    }
+
+    #[test]
     fn parses_periodic_bar_pattern() {
         let program =
             parse_program("[bd]\n  [bar%4] /4 <0 3 5 7>\n").expect("parse should succeed");
@@ -737,6 +749,13 @@ mod tests {
         let error = parse_program("[bd]\n  [default] /1\n  [default] /2\n")
             .expect_err("parse should fail");
         assert!(error.message.contains("[default]"));
+    }
+
+    #[test]
+    fn rejects_duplicate_intro_definition() {
+        let error = parse_program("[bd]\n  [intro] /1\n  [intro] /2\n")
+            .expect_err("parse should fail");
+        assert!(error.message.contains("[intro]"));
     }
 
     #[test]

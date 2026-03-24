@@ -14,7 +14,7 @@ use fin::dashboard::{DashboardRuntime, build_dashboard_state, render_dashboard};
 use fin::model::{Meter, Program, ScheduledEvent};
 use fin::osc::{OscClient, event_gain};
 use fin::parser::parse_program;
-use fin::scheduler::{format_events, schedule_bar};
+use fin::scheduler::{format_events, schedule_bar, schedule_intro};
 use fin::sounds::{format_sounds_report, load_sounds_report};
 use fin::supercollider::{StartMode, start_superdirt, stop_superdirt, superdirt_status};
 use fin::watcher::FileChangeWatcher;
@@ -140,15 +140,20 @@ fn run() -> Result<(), String> {
 fn run_file(path: PathBuf, host: String, port: u16, no_play: bool) -> Result<(), String> {
     ensure_metl_extension(&path)?;
     let loaded = load_track(&path)?;
+    let intro = render_intro(&loaded.program)?;
     let rendered = render_bar(&loaded.program, 0)?;
 
+    if let Some(intro) = &intro {
+        print_schedule(&intro.output);
+    }
     print_schedule(&rendered.output);
 
-    if !no_play && !rendered.events.is_empty() {
+    if !no_play {
         let client = OscClient::connect(&host, port).map_err(|error| error.to_string())?;
-        client
-            .play_bar(&loaded.program, &rendered.events)
-            .map_err(|error| error.to_string())?;
+        if let Some(intro) = &intro {
+            play_rendered_bar(&client, &loaded.program, intro).map_err(|error| error.to_string())?;
+        }
+        play_rendered_bar(&client, &loaded.program, &rendered).map_err(|error| error.to_string())?;
     }
 
     Ok(())
@@ -170,12 +175,24 @@ fn watch_file(
         Some(OscClient::connect(&host, port).map_err(|error| error.to_string())?)
     };
     let mut last_reload_error: Option<String> = None;
+    let intro = render_intro(&loaded.program)?;
 
     println!("watch load {}", path.display());
+    if let Some(intro) = &intro {
+        print_schedule(&intro.output);
+    }
     print_schedule(&render_bar(&loaded.program, 0)?.output);
 
     if bars == Some(0) {
         return Ok(());
+    }
+
+    if let Some(intro) = &intro {
+        if let Some(client) = &client {
+            play_rendered_bar(client, &loaded.program, intro).map_err(|error| error.to_string())?;
+        } else {
+            thread::sleep(bar_duration(&loaded.program, Meter::default()));
+        }
     }
 
     let mut completed_bars = 0usize;
@@ -263,6 +280,27 @@ fn dashboard_file(
     let mut last_reload_error: Option<String> = None;
     let mut visual_state = DashboardVisualState::new(&loaded.program);
     let mut pending_reload = false;
+
+    if let Some(intro) = render_intro(&loaded.program)? {
+        visual_state.sync_layers(&loaded.program);
+        if run_dashboard_bar(
+            &mut terminal,
+            &loaded.program,
+            &intro,
+            client.as_ref(),
+            &osc_status,
+            &mut watcher_status,
+            &mut pending_reload,
+            &mut file_watcher,
+            &mut visual_state,
+            0,
+            &mut logs,
+        )? {
+            push_log(&mut logs, "Quit requested".to_string());
+            return Ok(());
+        }
+    }
+
     loop {
         let rendered = render_bar(&loaded.program, completed_bars)?;
         visual_state.sync_layers(&loaded.program);
@@ -436,6 +474,29 @@ fn render_bar(program: &Program, bar_index: usize) -> Result<RenderedBar, String
         schedule_bar(program, Meter::default(), bar_index).map_err(|error| error.to_string())?;
     let output = format_events(program, &events);
     Ok(RenderedBar { events, output })
+}
+
+fn render_intro(program: &Program) -> Result<Option<RenderedBar>, String> {
+    if !program.layers.iter().any(|layer| layer.intro_bar().is_some()) {
+        return Ok(None);
+    }
+
+    let events = schedule_intro(program, Meter::default()).map_err(|error| error.to_string())?;
+    let output = format_events(program, &events);
+    Ok(Some(RenderedBar { events, output }))
+}
+
+fn play_rendered_bar(
+    client: &OscClient,
+    program: &Program,
+    rendered: &RenderedBar,
+) -> Result<(), fin::osc::OscError> {
+    if rendered.events.is_empty() {
+        thread::sleep(bar_duration(program, Meter::default()));
+        Ok(())
+    } else {
+        client.play_bar(program, &rendered.events)
+    }
 }
 
 struct LoadedTrack {

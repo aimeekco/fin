@@ -32,11 +32,26 @@ pub fn schedule_bar(
     meter: Meter,
     bar_index: usize,
 ) -> Result<Vec<ScheduledEvent>, ScheduleError> {
-    let mut events = Vec::new();
     let phrase_bar = (bar_index as u32 % program.effective_bars()) + 1;
+    schedule_selected_bars(program, meter, |layer| layer.bar_for_phrase(phrase_bar))
+}
+
+pub fn schedule_intro(program: &Program, meter: Meter) -> Result<Vec<ScheduledEvent>, ScheduleError> {
+    schedule_selected_bars(program, meter, |layer| layer.intro_bar())
+}
+
+fn schedule_selected_bars<'a, F>(
+    program: &'a Program,
+    meter: Meter,
+    mut select_bar: F,
+) -> Result<Vec<ScheduledEvent>, ScheduleError>
+where
+    F: FnMut(&'a Layer) -> Option<&'a BarPattern>,
+{
+    let mut events = Vec::new();
 
     for layer in &program.layers {
-        let Some(bar) = layer.bar_for_phrase(phrase_bar) else {
+        let Some(bar) = select_bar(layer) else {
             continue;
         };
 
@@ -503,6 +518,69 @@ mod tests {
 
         let events = schedule_bar(&program, Meter::default(), 1).expect("schedule should work");
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn intro_bar_definition_applies_only_during_intro_schedule() {
+        let program = Program {
+            bpm: Some(128.0),
+            bars: Some(4),
+            layers: vec![layer(
+                "bd",
+                &[(
+                    BarSelector::Intro,
+                    bar(
+                        PatternSource::Atom(PatternAtom::SampleIndex(8)),
+                        vec![Modifier::Divide(1)],
+                    ),
+                )],
+            )],
+        };
+
+        let intro = schedule_intro(&program, Meter::default()).expect("schedule should work");
+        let first_bar = schedule_bar(&program, Meter::default(), 0).expect("schedule should work");
+        let looped_bar = schedule_bar(&program, Meter::default(), 4).expect("schedule should work");
+
+        assert_eq!(intro.len(), 1);
+        assert_eq!(intro[0].sound.display_name(), "bd:8");
+        assert!(first_bar.is_empty());
+        assert!(looped_bar.is_empty());
+    }
+
+    #[test]
+    fn exact_bar_definition_applies_after_intro_schedule() {
+        let program = Program {
+            bpm: Some(128.0),
+            bars: Some(4),
+            layers: vec![layer(
+                "bd",
+                &[
+                    (
+                        BarSelector::Intro,
+                        bar(
+                            PatternSource::Atom(PatternAtom::SampleIndex(8)),
+                            vec![Modifier::Divide(1)],
+                        ),
+                    ),
+                    (
+                        BarSelector::Exact(1),
+                        bar(
+                            PatternSource::Atom(PatternAtom::SampleIndex(1)),
+                            vec![Modifier::Divide(1)],
+                        ),
+                    ),
+                ],
+            )],
+        };
+
+        let intro = schedule_intro(&program, Meter::default()).expect("schedule should work");
+        let first_bar = schedule_bar(&program, Meter::default(), 0).expect("schedule should work");
+        let second_cycle_first_bar =
+            schedule_bar(&program, Meter::default(), 4).expect("schedule should work");
+
+        assert_eq!(intro[0].sound.display_name(), "bd:8");
+        assert_eq!(first_bar[0].sound.display_name(), "bd:1");
+        assert_eq!(second_cycle_first_bar[0].sound.display_name(), "bd:1");
     }
 
     #[test]

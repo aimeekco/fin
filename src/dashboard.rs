@@ -585,6 +585,26 @@ mod tests {
     }
 
     #[test]
+    fn layer_detail_labels_intro_bar() {
+        let layer = Layer {
+            name: Symbol("bd".to_string()),
+            default_target: SoundTarget {
+                name: "bd".to_string(),
+                index: None,
+            },
+            modifiers: Vec::new(),
+            bars: BTreeMap::from([(
+                BarSelector::Intro,
+                bar(PatternSource::ImplicitSelf, vec![Modifier::Divide(4)]),
+            )]),
+            source_line: 1,
+        };
+
+        let detail = layer_detail(&layer);
+        assert!(detail.contains("[intro] /4 self"));
+    }
+
+    #[test]
     fn layer_detail_labels_periodic_bar() {
         let layer = Layer {
             name: Symbol("bd".to_string()),
