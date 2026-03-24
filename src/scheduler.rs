@@ -43,12 +43,17 @@ pub fn schedule_bar(
         let mut divide = 1u32;
         let mut multiply = 1u32;
         let mut shift = 0.0f32;
+        let mut has_explicit_density = false;
         let mut params = collect_layer_params(&layer.modifiers)?;
 
         for modifier in &bar.modifiers {
             match modifier {
-                Modifier::Divide(value) => divide = *value,
+                Modifier::Divide(value) => {
+                    divide = *value;
+                    has_explicit_density = true;
+                }
                 Modifier::Multiply(value) => {
+                    has_explicit_density = true;
                     multiply = multiply
                         .checked_mul(*value)
                         .ok_or_else(|| ScheduleError::new("density overflowed supported range"))?
@@ -91,6 +96,7 @@ pub fn schedule_bar(
                 shift,
                 params.clone(),
                 meter,
+                has_explicit_density,
             )?,
         }
     }
@@ -183,10 +189,11 @@ fn schedule_sequence(
     events: &mut Vec<ScheduledEvent>,
     layer: &Layer,
     values: &[PatternValue],
-    slots: u32,
+    default_slots: u32,
     shift: f32,
     params: EventParams,
     meter: Meter,
+    has_explicit_density: bool,
 ) -> Result<(), ScheduleError> {
     if values.is_empty() {
         return Err(ScheduleError::new("sequence pattern cannot be empty"));
@@ -203,10 +210,16 @@ fn schedule_sequence(
     });
 
     if all_notes {
-        return schedule_note_sequence(events, layer, values, slots, shift, params, meter);
+        return schedule_note_sequence(events, layer, values, default_slots, shift, params, meter);
     }
 
     if all_atoms {
+        let slots = if has_explicit_density {
+            default_slots
+        } else {
+            values.len() as u32
+        };
+
         for slot in 0..slots {
             let base_bar_pos = slot as f32 / slots as f32;
             let bar_pos = (base_bar_pos + shift).rem_euclid(1.0);
@@ -329,6 +342,39 @@ mod tests {
             .iter()
             .map(|event| event.sound.display_name())
             .collect();
+        assert_eq!(labels, vec!["bd:0", "bd:3", "bd:5", "bd:7"]);
+    }
+
+    #[test]
+    fn infers_slot_count_for_atom_sequence_without_density_modifier() {
+        let program = Program {
+            bpm: Some(128.0),
+            bars: Some(4),
+            layers: vec![layer(
+                "bd",
+                &[(
+                    BarSelector::Exact(1),
+                    bar(
+                        PatternSource::Sequence(vec![
+                            PatternValue::Atom(PatternAtom::SampleIndex(0)),
+                            PatternValue::Atom(PatternAtom::SampleIndex(3)),
+                            PatternValue::Atom(PatternAtom::SampleIndex(5)),
+                            PatternValue::Atom(PatternAtom::SampleIndex(7)),
+                        ]),
+                        vec![],
+                    ),
+                )],
+            )],
+        };
+
+        let events = schedule_bar(&program, Meter::default(), 0).expect("schedule should work");
+        let beats: Vec<f32> = events.iter().map(|event| event.beat_pos).collect();
+        let labels: Vec<String> = events
+            .iter()
+            .map(|event| event.sound.display_name())
+            .collect();
+
+        assert_eq!(beats, vec![0.0, 1.0, 2.0, 3.0]);
         assert_eq!(labels, vec!["bd:0", "bd:3", "bd:5", "bd:7"]);
     }
 

@@ -1,7 +1,7 @@
 bpm = 148
 bars = 32
 
-[superfm] .sustain 0.3
+[superfm] .sustain 0.3 .gain 0.7
     [bar1] <d5 g4 e4 d5 g4 e4 d5 g4>
     [bar2] <e4 d5 g4 e4 d5 g4 e4 d5>
     [bar3] <g4 e4 d5 g4 e4 d5 g4 e4> 
@@ -39,8 +39,11 @@ bars = 32
     [default] /8
 
 [supersnare] .gain 0.8
-    [default] /16 <_ _ _ _ 0 _ _ 0 _ _ _ 0 _ _ 0>
+    [default] /16 <_ _ _ _ 0 _ _ 0 _ _ _ _ 0 _ _ 0>
 
 [ht] .gain 1.1
     [bar%4] /8 <0 0 _ _ _ _ _ _>
     [bar%2] /8 <0 _ _ _ _ _ _ _>
+
+[bd] .gain 1.1
+    [default] 

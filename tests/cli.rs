@@ -148,6 +148,27 @@ fn run_prints_sample_index_pattern_body() {
 }
 
 #[test]
+fn run_infers_density_for_atom_sequence_body() {
+    let path = temp_file_path("metl");
+    fs::write(&path, "bpm = 120\n[bd]\n  [bar1] <0 3 5 7>\n").expect("should write test file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fin"))
+        .arg("run")
+        .arg("--no-play")
+        .arg(&path)
+        .output()
+        .expect("command should run");
+
+    fs::remove_file(&path).expect("should clean up temp file");
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "bpm=120\nbd:0  beat=0.000  bar=0.000\nbd:3  beat=1.000  bar=0.250\nbd:5  beat=2.000  bar=0.500\nbd:7  beat=3.000  bar=0.750\n"
+    );
+}
+
+#[test]
 fn run_prints_group_pattern_body() {
     let path = temp_file_path("metl");
     fs::write(&path, "bpm = 120\n[drum]\n  [bar1] /1 [bd sd:2]\n")

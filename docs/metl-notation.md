@@ -111,7 +111,8 @@ Sequence patterns use angle brackets:
 
 Sequence semantics:
 
-- atom sequences step across the bar-local slots produced by `/n` and `*n`
+- atom and hit/rest sequences step across the bar-local slots produced by `/n` and `*n`
+- if an atom or hit/rest sequence omits `/n` and `*n`, it defaults to one slot per sequence value
 - note sequences subdivide each slot evenly across the listed notes
 
 ## Timing Operators
