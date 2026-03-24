@@ -1,7 +1,8 @@
 bpm = 120
 
 [cyclo] .sustain 0.5
-    [default] <a5 cs6 fs6 a5 cs6 fs6 a5 cs6>
+    [bar1] <a5 cs6 fs6 a5 cs6 fs6 a5 cs6>
+    [bar2] <a5 ds6 fs6 a5 ds6 fs6 a5 ds6>
     [bar3] <b5 e6 gs6 b5 e6 gs6 b5 e6>
     [bar4] <b5 ds6 gs6 b5 ds6 gs6 b5 ds6>
 

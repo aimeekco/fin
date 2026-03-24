@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 
+use ratatui::buffer::Buffer;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap};
+use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Widget};
 
 use crate::model::{
     BarPattern, BarSelector, Layer, Modifier, NoteValue, PatternAtom, PatternSource,
@@ -16,7 +17,6 @@ const METER_WIDTH: usize = 30;
 const TRANSPORT_WIDTH: usize = 32;
 const MASTER_WIDTH: usize = 48;
 const SCOPE_WIDTH: usize = 24;
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct DashboardState {
     pub status: String,
@@ -28,6 +28,7 @@ pub struct DashboardState {
     pub master_peak: f32,
     pub transport: TransportRow,
     pub layers: Vec<LayerRow>,
+    pub bottom_art: BottomArt,
     pub logs: Vec<String>,
 }
 
@@ -69,12 +70,27 @@ pub struct LayerRow {
     pub peak: f32,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct BottomArt {
+    pub phase: f32,
+    pub peak: f32,
+    pub density: f32,
+    pub energy: f32,
+    pub chaos_seed: u32,
+}
+
 pub fn build_dashboard_state(
     program: &Program,
     events: &[ScheduledEvent],
     runtime: DashboardRuntime,
     logs: Vec<String>,
 ) -> DashboardState {
+    let bottom_art = build_bottom_art(
+        runtime.bar_progress,
+        runtime.master_peak,
+        &runtime.master_scope,
+        events,
+    );
     let clip_percent = estimate_clip_percent(events);
     DashboardState {
         status: if runtime.pending_reload {
@@ -90,6 +106,7 @@ pub fn build_dashboard_state(
         master_peak: runtime.master_peak,
         transport: build_transport_row(runtime.bar_index, runtime.bar_progress, runtime.master_peak, events),
         layers: build_layer_rows(program, events, &runtime.layer_visuals),
+        bottom_art,
         logs,
     }
 }
@@ -160,7 +177,7 @@ pub fn render_dashboard(frame: &mut Frame<'_>, area: Rect, state: &DashboardStat
         Constraint::Length(4),
         Constraint::Length(5),
         Constraint::Min(8),
-        Constraint::Min(6),
+        Constraint::Min(10),
         Constraint::Length(1),
     ])
     .split(inner);
@@ -180,7 +197,7 @@ pub fn render_dashboard(frame: &mut Frame<'_>, area: Rect, state: &DashboardStat
     render_transport(frame, sections[1], &state.transport);
     render_master(frame, sections[2], state);
     render_layers(frame, sections[3], &state.layers);
-    render_logs(frame, sections[4], &state.logs);
+    render_bottom_art(frame, sections[4], &state.bottom_art);
     frame.render_widget(Paragraph::new("q quit"), sections[5]);
 }
 
@@ -284,16 +301,11 @@ fn render_layers(frame: &mut Frame<'_>, area: Rect, layers: &[LayerRow]) {
     frame.render_widget(table, inner);
 }
 
-fn render_logs(frame: &mut Frame<'_>, area: Rect, logs: &[String]) {
-    let block = Block::default().borders(Borders::TOP).title(" LOG ");
+fn render_bottom_art(frame: &mut Frame<'_>, area: Rect, art: &BottomArt) {
+    let block = Block::default().borders(Borders::TOP).title(" RAVE ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let lines: Vec<Line<'_>> = logs
-        .iter()
-        .map(|entry| Line::from(entry.as_str()))
-        .collect();
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
-    frame.render_widget(paragraph, inner);
+    frame.render_widget(RaveArtWidget { art }, inner);
 }
 
 fn meter_bar(ratio: f32, live_level: f32, hits: usize) -> String {
@@ -423,6 +435,170 @@ fn pulse_bar(width: usize, peak: f32) -> String {
     }
     pulse.push(']');
     pulse
+}
+
+fn build_bottom_art(
+    bar_progress: f32,
+    master_peak: f32,
+    master_scope: &str,
+    events: &[ScheduledEvent],
+) -> BottomArt {
+    let chaos_seed = master_scope
+        .chars()
+        .fold(events.len() as u32 + 1, |acc, ch| {
+            acc.wrapping_mul(33).wrapping_add(ch as u32)
+        });
+    BottomArt {
+        phase: bar_progress.clamp(0.0, 1.0),
+        peak: master_peak.clamp(0.0, 1.0),
+        density: (events.len() as f32 / 12.0).clamp(0.0, 1.0),
+        energy: scope_level(master_scope),
+        chaos_seed,
+    }
+}
+
+struct RaveArtWidget<'a> {
+    art: &'a BottomArt,
+}
+
+impl Widget for RaveArtWidget<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let width = area.width.max(1) as usize;
+        let height = area.height.max(1) as usize;
+        let phase_x = ((self.art.phase * width as f32).floor() as usize).min(width - 1);
+        let phase_y = ((self.art.phase * height as f32).floor() as usize).min(height - 1);
+        let pulse_radius = ((self.art.peak * width as f32 * 0.18).round() as usize).max(2);
+
+        for dy in 0..height {
+            for dx in 0..width {
+                let x = area.x + dx as u16;
+                let y = area.y + dy as u16;
+                let cell = buf.cell_mut((x, y)).expect("cell should exist");
+
+                let noise = noise2d(self.art.chaos_seed, dx as u32, dy as u32);
+                let noise_b = noise2d(
+                    self.art.chaos_seed ^ 0x9e37_79b9,
+                    (dx as u32).wrapping_add(17),
+                    (dy as u32).wrapping_add(31),
+                );
+                let left_dist = dx.abs_diff(phase_x);
+                let right_dist = dx.abs_diff(width.saturating_sub(phase_x + 1));
+                let vertical_dist = dy.abs_diff(phase_y);
+                let beam = left_dist.min(right_dist) <= pulse_radius / 3;
+                let halo = left_dist.min(right_dist) <= pulse_radius;
+                let strobe = noise > 0.86 - self.art.peak * 0.22;
+                let lattice = ((dx * 3 + dy * 5 + phase_x) % 11 == 0) || ((dx + dy * 2 + phase_y) % 13 == 0);
+                let floor = dy > (height * 2) / 3 && noise_b > 0.38 - self.art.density * 0.18;
+                let corona = vertical_dist <= 1 && noise > 0.52;
+
+                let symbol = if beam && corona {
+                    "█"
+                } else if beam {
+                    if dy % 2 == 0 { "▊" } else { "▌" }
+                } else if halo && strobe {
+                    "▓"
+                } else if lattice && self.art.energy > 0.2 {
+                    if noise_b > 0.5 { "╱" } else { "╲" }
+                } else if floor {
+                    match ((noise_b * 4.0).floor() as u8).min(3) {
+                        0 => "▁",
+                        1 => "▂",
+                        2 => "▃",
+                        _ => "▄",
+                    }
+                } else if strobe {
+                    if noise_b > 0.5 { "░" } else { "▒" }
+                } else if noise > 0.58 && self.art.density > 0.35 {
+                    "·"
+                } else {
+                    " "
+                };
+
+                let fg = rave_color(self.art, dx, dy, width, height, noise, beam, halo);
+                let bg = rave_bg(self.art, dx, dy, width, height, noise_b, floor);
+
+                cell.set_symbol(symbol);
+                cell.set_fg(fg);
+                cell.set_bg(bg);
+                cell.set_style(Style::default().add_modifier(StyleModifier::BOLD));
+            }
+        }
+    }
+}
+
+fn noise2d(seed: u32, x: u32, y: u32) -> f32 {
+    let mut z = seed
+        .wrapping_add(x.wrapping_mul(0x85eb_ca6b))
+        .wrapping_add(y.wrapping_mul(0xc2b2_ae35))
+        .wrapping_add((x ^ y).wrapping_mul(0x27d4_eb2d));
+    z ^= z >> 15;
+    z = z.wrapping_mul(0x2c1b_3c6d);
+    z ^= z >> 12;
+    z = z.wrapping_mul(0x297a_2d39);
+    z ^= z >> 15;
+    (z as f32) / (u32::MAX as f32)
+}
+
+fn rave_color(
+    art: &BottomArt,
+    dx: usize,
+    dy: usize,
+    width: usize,
+    height: usize,
+    noise: f32,
+    beam: bool,
+    halo: bool,
+) -> Color {
+    let x_ratio = dx as f32 / width.max(1) as f32;
+    let y_ratio = dy as f32 / height.max(1) as f32;
+    let pulse = (art.peak * 255.0).round() as u8;
+    if beam {
+        return Color::Rgb(255, 220u8.saturating_add((art.energy * 35.0) as u8), 180);
+    }
+    if halo {
+        return Color::Rgb(
+            255,
+            (80.0 + art.peak * 120.0).round() as u8,
+            (160.0 + x_ratio * 80.0).round() as u8,
+        );
+    }
+
+    let r = (60.0 + x_ratio * 140.0 + noise * 50.0 + art.density * 30.0)
+        .round()
+        .clamp(0.0, 255.0) as u8;
+    let g = (20.0 + y_ratio * 80.0 + (1.0 - noise) * 40.0 + art.energy * 40.0)
+        .round()
+        .clamp(0.0, 255.0) as u8;
+    let b = (100.0 + (1.0 - x_ratio) * 110.0 + art.peak * 90.0 + pulse as f32 * 0.1)
+        .round()
+        .clamp(0.0, 255.0) as u8;
+    Color::Rgb(r, g, b)
+}
+
+fn rave_bg(
+    art: &BottomArt,
+    dx: usize,
+    dy: usize,
+    width: usize,
+    height: usize,
+    noise: f32,
+    floor: bool,
+) -> Color {
+    let x_ratio = dx as f32 / width.max(1) as f32;
+    let y_ratio = dy as f32 / height.max(1) as f32;
+    if floor {
+        return Color::Rgb(
+            (10.0 + art.density * 30.0).round() as u8,
+            (4.0 + noise * 20.0).round() as u8,
+            (20.0 + art.peak * 45.0 + x_ratio * 20.0).round() as u8,
+        );
+    }
+
+    Color::Rgb(
+        (2.0 + noise * 12.0).round() as u8,
+        (1.0 + y_ratio * 6.0).round() as u8,
+        (8.0 + art.energy * 20.0 + (1.0 - y_ratio) * 16.0).round() as u8,
+    )
 }
 
 fn scope_level(scope: &str) -> f32 {
@@ -783,6 +959,35 @@ mod tests {
         assert!(transport.playhead_bar.contains('◆'));
         assert!(transport.pulse_bar.contains('█'));
         assert_eq!(transport.hits, 1);
+    }
+
+    #[test]
+    fn bottom_art_reacts_to_peak_activity() {
+        let art = build_bottom_art(
+            0.5,
+            0.9,
+            "        ..::==##@@",
+            &[ScheduledEvent {
+                layer: Symbol("bd".to_string()),
+                sound: SoundTarget {
+                    name: "bd".to_string(),
+                    index: None,
+                },
+                bar_pos: 0.5,
+                beat_pos: 2.0,
+                params: EventParams {
+                    gain: Some(0.9),
+                    ..EventParams::default()
+                },
+            }],
+        );
+
+        assert_eq!(art.phase, 0.5);
+        assert!(art.peak > 0.8);
+        assert!(art.density > 0.0);
+        assert!(art.energy > 0.0);
+        assert!(art.chaos_seed > 0);
+        assert_ne!(noise2d(art.chaos_seed, 2, 8), noise2d(art.chaos_seed, 3, 8));
     }
 
     #[test]
