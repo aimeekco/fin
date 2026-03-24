@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+pub const DEFAULT_BAR_INDEX: u32 = 0;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Symbol(pub String);
 
@@ -34,6 +36,14 @@ pub struct Layer {
     pub modifiers: Vec<Modifier>,
     pub bars: BTreeMap<u32, BarPattern>,
     pub source_line: usize,
+}
+
+impl Layer {
+    pub fn bar_for_phrase(&self, phrase_bar: u32) -> Option<&BarPattern> {
+        self.bars
+            .get(&phrase_bar)
+            .or_else(|| self.bars.get(&DEFAULT_BAR_INDEX))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

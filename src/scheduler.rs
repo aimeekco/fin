@@ -36,7 +36,7 @@ pub fn schedule_bar(
     let phrase_bar = (bar_index as u32 % program.effective_bars()) + 1;
 
     for layer in &program.layers {
-        let Some(bar) = layer.bars.get(&phrase_bar) else {
+        let Some(bar) = layer.bar_for_phrase(phrase_bar) else {
             continue;
         };
 
@@ -459,6 +459,59 @@ mod tests {
 
         let events = schedule_bar(&program, Meter::default(), 1).expect("schedule should work");
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn default_bar_definition_applies_when_specific_bar_is_missing() {
+        let program = Program {
+            bpm: Some(128.0),
+            bars: Some(4),
+            layers: vec![layer(
+                "bd",
+                &[(
+                    crate::model::DEFAULT_BAR_INDEX,
+                    bar(
+                        PatternSource::Atom(PatternAtom::SampleIndex(7)),
+                        vec![Modifier::Divide(1)],
+                    ),
+                )],
+            )],
+        };
+
+        let events = schedule_bar(&program, Meter::default(), 2).expect("schedule should work");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].sound.display_name(), "bd:7");
+    }
+
+    #[test]
+    fn specific_bar_overrides_default_bar_definition() {
+        let program = Program {
+            bpm: Some(128.0),
+            bars: Some(4),
+            layers: vec![layer(
+                "bd",
+                &[
+                    (
+                        crate::model::DEFAULT_BAR_INDEX,
+                        bar(
+                            PatternSource::Atom(PatternAtom::SampleIndex(7)),
+                            vec![Modifier::Divide(1)],
+                        ),
+                    ),
+                    (
+                        2,
+                        bar(
+                            PatternSource::Atom(PatternAtom::SampleIndex(3)),
+                            vec![Modifier::Divide(1)],
+                        ),
+                    ),
+                ],
+            )],
+        };
+
+        let events = schedule_bar(&program, Meter::default(), 1).expect("schedule should work");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].sound.display_name(), "bd:3");
     }
 
     #[test]

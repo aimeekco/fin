@@ -8,7 +8,7 @@ use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap};
 
 use crate::model::{
     BarPattern, Layer, Modifier, NoteValue, PatternAtom, PatternSource, PatternValue, Program,
-    ScheduledEvent,
+    ScheduledEvent, DEFAULT_BAR_INDEX,
 };
 use crate::osc::event_gain;
 
@@ -326,11 +326,21 @@ fn layer_detail(layer: &Layer) -> String {
             layer
                 .bars
                 .iter()
-                .map(|(bar_index, pattern)| format!("bar{bar_index} {}", bar_pattern_label(pattern))),
+                .map(|(bar_index, pattern)| {
+                    format!("{} {}", bar_label(*bar_index), bar_pattern_label(pattern))
+                }),
         );
     }
 
     parts.join(" | ")
+}
+
+fn bar_label(bar_index: u32) -> String {
+    if bar_index == DEFAULT_BAR_INDEX {
+        "[default]".to_string()
+    } else {
+        format!("bar{bar_index}")
+    }
 }
 
 fn atom_label(atom: &PatternAtom) -> String {
@@ -556,6 +566,26 @@ mod tests {
         let detail = layer_detail(&layer);
         assert!(detail.contains("<g4 a4>"));
         assert!(detail.contains("/1"));
+    }
+
+    #[test]
+    fn layer_detail_labels_default_bar() {
+        let layer = Layer {
+            name: Symbol("bd".to_string()),
+            default_target: SoundTarget {
+                name: "bd".to_string(),
+                index: None,
+            },
+            modifiers: Vec::new(),
+            bars: BTreeMap::from([(
+                DEFAULT_BAR_INDEX,
+                bar(PatternSource::ImplicitSelf, vec![Modifier::Divide(4)]),
+            )]),
+            source_line: 1,
+        };
+
+        let detail = layer_detail(&layer);
+        assert!(detail.contains("[default] /4 self"));
     }
 
     #[test]

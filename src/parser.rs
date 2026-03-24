@@ -14,7 +14,7 @@ use nom::sequence::{delimited, preceded, separated_pair};
 
 use crate::model::{
     BarPattern, Layer, Modifier, NoteValue, PatternAtom, PatternSource, PatternValue, Program,
-    SoundTarget, Symbol,
+    SoundTarget, Symbol, DEFAULT_BAR_INDEX,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,7 +110,11 @@ pub fn parse_program(input: &str) -> Result<Program, ParseError> {
             if layer.bars.insert(bar_index, bar_pattern).is_some() {
                 return Err(ParseError {
                     line: line_no,
-                    message: format!("duplicate `[bar{bar_index}]` definition"),
+                    message: if bar_index == DEFAULT_BAR_INDEX {
+                        "duplicate `[default]` definition".to_string()
+                    } else {
+                        format!("duplicate `[bar{bar_index}]` definition")
+                    },
                 });
             }
         }
@@ -129,7 +133,7 @@ fn validate_program(program: &Program) -> Result<(), ParseError> {
     let max_bars = program.effective_bars();
     for layer in &program.layers {
         for (&bar_index, bar) in &layer.bars {
-            if bar_index == 0 || bar_index > max_bars {
+            if bar_index != DEFAULT_BAR_INDEX && bar_index > max_bars {
                 return Err(ParseError {
                     line: bar.source_line,
                     message: format!("`[bar{bar_index}]` is out of range for bars={max_bars}"),
@@ -237,7 +241,11 @@ fn layer_header(input: &str) -> IResult<&str, SoundTarget> {
 }
 
 fn bar_header(input: &str) -> IResult<&str, u32> {
-    delimited(tag("[bar"), unsigned_value, char(']')).parse(input)
+    alt((
+        map(tag("[default]"), |_| DEFAULT_BAR_INDEX),
+        delimited(tag("[bar"), unsigned_value, char(']')),
+    ))
+    .parse(input)
 }
 
 fn unsigned_value(input: &str) -> IResult<&str, u32> {
@@ -651,6 +659,17 @@ mod tests {
     }
 
     #[test]
+    fn parses_default_bar_pattern() {
+        let program =
+            parse_program("[bd]\n  [default] /4 <0 3 5 7>\n").expect("parse should succeed");
+        let bar = program.layers[0]
+            .bars
+            .get(&DEFAULT_BAR_INDEX)
+            .expect("default bar should exist");
+        assert_eq!(bar.modifiers, vec![Modifier::Divide(4)]);
+    }
+
+    #[test]
     fn rejects_bar_outside_global_phrase_length() {
         let error =
             parse_program("bars = 4\n[bd]\n  [bar5] /1\n").expect_err("parse should fail");
@@ -662,6 +681,13 @@ mod tests {
         let error =
             parse_program("[bd]\n  [bar1] /1\n  [bar1] /2\n").expect_err("parse should fail");
         assert!(error.message.contains("duplicate"));
+    }
+
+    #[test]
+    fn rejects_duplicate_default_definition() {
+        let error = parse_program("[bd]\n  [default] /1\n  [default] /2\n")
+            .expect_err("parse should fail");
+        assert!(error.message.contains("[default]"));
     }
 
     #[test]

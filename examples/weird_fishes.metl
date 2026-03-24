@@ -1,0 +1,39 @@
+bpm = 148
+bars = 32
+
+[superfm] .sustain 0.3
+    [bar1] <d5 g4 e4 d5 g4 e4 d5 g4>
+    [bar2] <e4 d5 g4 e4 d5 g4 e4 d5>
+    [bar3] <g4 e4 d5 g4 e4 d5 g4 e4> 
+    [bar4] <d5 g4 e4 d5 g4 e4 e5 a4>
+    [bar5] <fs4 e5 a4 fs4 e5 a4 fs4 e5>
+    [bar6] <a4 fs4 e5 a4 fs4 e5 a4 fs4>
+    [bar7] <e5 a4 fs4 e5 a4 fs4 e5 a4>
+    [bar8] <fs4 e5 a4 fs4 e5 a4 fs4 _>
+    [bar9] <a5 cs5 a4 a5 cs5 a4 a5 cs5>
+    [bar10] <a4 a5 cs5 a4 a5 cs5 a4 a5>
+    [bar11] <cs5 a4 a5 cs5 a4 a5 cs5 a4>
+    [bar12] <a5 cs5 a4 a5 cs5 a4 a5 _>
+    [bar13] <fs5 b4 g4 fs5 b4 g4 fs5 b4>
+    [bar14] <g4 fs5 b4 g4 fs5 b4 g4 fs5>
+    [bar15] <b4 g4 fs5 b4 g4 fs5 b4 g4>
+    [bar16] <fs5 b4 g4 fs5 b4 g4 d5 g4>
+    [bar17] <e4 d5 g4 e4 d5 g4 e4 d5>
+    [bar18] <g4 e4 d5 g4 e4 d5 g4 e4>
+    [bar19] <d5 g4 e4 d5 g4 e4 d5 g4>
+    [bar20] <e4 d5 g4 e4 d5 g4 e4 e5>
+    [bar21] <a4 fs4 e5 a4 fs4 e5 a4 fs4>
+    [bar22] <e5 a4 fs4 e5 a4 fs4 e5 a4>
+    [bar23] <fs4 e5 a4 fs4 e5 a4 fs4 e5>
+    [bar24] <a4 fs4 e5 a4 fs4 e5 a4 _>
+    [bar25] <a5 cs5 a4 a5 cs5 a4 a5 cs5>
+    [bar26] <a4 a5 cs5 a4 a5 cs5 a4 g5>
+    [bar27] <cs5 a4 g5 cs5 a4 g5 cs5 a4>
+    [bar28] <fs5 cs5 a4 fs5 cs5 a4 fs5 _>
+    [bar29] <fs5 b4 g4 fs5 b4 g4 fs5 b4>
+    [bar30] <g4 fs5 b4 g4 fs5 b4 g4 fs5>
+    [bar31] <b4 g4 fs5 b4 g4 fs5 b4 g4>
+    [bar32] <fs5 b4 g4 fs5 b4 g4 d5 g4>
+
+[hh] .gain 1.03
+    [default] /8

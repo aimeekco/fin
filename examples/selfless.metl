@@ -1,0 +1,23 @@
+bpm = 120
+
+[cyclo] .sustain 0.5
+    [default] <a5 cs6 fs6 a5 cs6 fs6 a5 cs6>
+    [bar3] <b5 e6 gs6 b5 e6 gs6 b5 e6>
+    [bar4] <b5 ds6 gs6 b5 ds6 gs6 b5 ds6>
+
+[cyclo] .sustain 1.5
+    [default] <a4 _ _ a4 _ _ a4 _>
+    [bar3] <b4 _ _ b4 _ _ b4 _>
+    [bar4] <b4 _ _ b4 _ _ b4 _>
+
+[kicklinn] .gain 1.1
+    [default] /8 <0 0 _ 0 0 _ _ _>
+    [bar4] /8 <0 0 _ 0 0 _ 0 _>
+
+[sd]
+    [default] /8 <_ _ 0 _ _ 0 _ _>
+    [bar4] /8 <_ _ 0 _ _ 0 _ 0>
+
+
+[hh] .gain 1.2
+    [default] /8

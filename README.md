@@ -19,6 +19,7 @@ Implemented METL subset:
 - `bars = <positive integer>`
 - `[layer]`
 - `[layer:index]`
+- indented `[default]` entries under a layer as the per-layer fallback bar
 - indented `[barN]` entries under each layer
 - sequence patterns like `<g4 a4 a3 c3>` and `<0 3 5 7>`
 - compact hit/rest grids like `<xxxoxxxxxxxooxxxo>`
@@ -208,10 +209,11 @@ bars = 4
   [bar2] /4 <0 0 5 7>
 
 [sd] .gain 0.8
-  [bar1] /2 >> 0.25
+  [default] /2 >> 0.25
+  [bar2] /1
 
 [hh] .pan 0.2 .speed 1.1 .sustain 0.15
-  [bar1] *4 [hh hh:2]
+  [default] *4 [hh hh:2]
 ```
 
 ## Documentation

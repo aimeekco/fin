@@ -170,6 +170,27 @@ fn run_prints_group_pattern_body() {
 }
 
 #[test]
+fn run_accepts_default_bar_definition() {
+    let path = temp_file_path("metl");
+    fs::write(&path, "bpm = 120\n[bd]\n  [default] /4\n").expect("should write test file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fin"))
+        .arg("run")
+        .arg("--no-play")
+        .arg(&path)
+        .output()
+        .expect("command should run");
+
+    fs::remove_file(&path).expect("should clean up temp file");
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "bpm=120\nbd  beat=0.000  bar=0.000\nbd  beat=1.000  bar=0.250\nbd  beat=2.000  bar=0.500\nbd  beat=3.000  bar=0.750\n"
+    );
+}
+
+#[test]
 fn run_prints_note_sequence_body() {
     let path = temp_file_path("metl");
     fs::write(&path, "bpm = 120\n[bass]\n  [bar1] <g4 a4 a3 c3>\n")
