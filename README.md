@@ -1,4 +1,5 @@
 # fin
+<img width="1503" height="888" alt="Screenshot 2026-03-23 at 9 48 13 PM" src="https://github.com/user-attachments/assets/1b7e4c57-59b1-40b7-b1c2-a2f17e315e5b" />
 
 `fin` is the runtime for METL, a CLI live-coding environment for electronic music written in Rust and backed by SuperCollider over OSC.
 
