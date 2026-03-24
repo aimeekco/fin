@@ -324,15 +324,16 @@ fn dashboard_file(
                 &rendered,
                 DashboardRuntime {
                     osc_status: osc_status.clone(),
-                    watcher_status: watcher_status.clone(),
-                    bar_index: completed_bars,
-                    bar_progress: 1.0,
-                    pending_reload,
-                    master_scope: visual_state.master_scope.clone(),
-                    layer_visuals: visual_state.layer_visuals(),
-                },
-                &logs,
-            )
+                watcher_status: watcher_status.clone(),
+                bar_index: completed_bars,
+                bar_progress: 1.0,
+                pending_reload,
+                master_scope: visual_state.master_scope.clone(),
+                master_peak: visual_state.master_peak,
+                layer_visuals: visual_state.layer_visuals(),
+            },
+            &logs,
+        )
             .map_err(|error| error.to_string())?;
             return Ok(());
         }
@@ -351,6 +352,7 @@ fn dashboard_file(
                     bar_progress: 1.0,
                     pending_reload,
                     master_scope: visual_state.master_scope.clone(),
+                    master_peak: visual_state.master_peak,
                     layer_visuals: visual_state.layer_visuals(),
                 },
                 &logs,
@@ -583,6 +585,7 @@ fn run_dashboard_bar(
                 bar_progress: progress,
                 pending_reload: *pending_reload,
                 master_scope: visual_state.master_scope.clone(),
+                master_peak: visual_state.master_peak,
                 layer_visuals: visual_state.layer_visuals(),
             },
             logs,
@@ -618,6 +621,8 @@ struct DashboardVisualState {
     pulses: Vec<LayerPulse>,
     scope_history: BTreeMap<String, String>,
     master_scope: String,
+    layer_peaks: BTreeMap<String, f32>,
+    master_peak: f32,
 }
 
 impl DashboardVisualState {
@@ -626,6 +631,8 @@ impl DashboardVisualState {
             pulses: Vec::new(),
             scope_history: BTreeMap::new(),
             master_scope: " ".repeat(SCOPE_HISTORY_WIDTH),
+            layer_peaks: BTreeMap::new(),
+            master_peak: 0.0,
         };
         state.sync_layers(program);
         state
@@ -639,6 +646,8 @@ impl DashboardVisualState {
                 .or_insert_with(|| " ".repeat(SCOPE_HISTORY_WIDTH));
         }
         existing.retain(|name, _| program.layers.iter().any(|layer| &layer.name.0 == name));
+        self.layer_peaks
+            .retain(|name, _| program.layers.iter().any(|layer| &layer.name.0 == name));
     }
 
     fn push_trigger(&mut self, event: &ScheduledEvent, now: Instant) {
@@ -655,6 +664,7 @@ impl DashboardVisualState {
         });
         let mut per_layer = BTreeMap::<String, f32>::new();
         let mut master = 0.0f32;
+        let mut master_peak = 0.0f32;
 
         for pulse in &self.pulses {
             let age = now.saturating_duration_since(pulse.at).as_secs_f32();
@@ -664,6 +674,7 @@ impl DashboardVisualState {
             }
             *per_layer.entry(pulse.layer.clone()).or_default() += level;
             master += level;
+            master_peak = master_peak.max((1.0 - age / (LEVEL_DECAY_SECONDS * 0.5)).clamp(0.0, 1.0) * pulse.gain);
         }
 
         for layer in &program.layers {
@@ -672,6 +683,14 @@ impl DashboardVisualState {
                 .copied()
                 .unwrap_or(0.0)
                 .clamp(0.0, 1.0);
+            let peak = self
+                .layer_peaks
+                .get(&layer.name.0)
+                .copied()
+                .unwrap_or(0.0)
+                * 0.82;
+            self.layer_peaks
+                .insert(layer.name.0.clone(), peak.max(level));
             let entry = self
                 .scope_history
                 .entry(layer.name.0.clone())
@@ -680,6 +699,7 @@ impl DashboardVisualState {
         }
 
         push_scope_sample(&mut self.master_scope, master.clamp(0.0, 1.0));
+        self.master_peak = (self.master_peak * 0.82).max(master_peak.clamp(0.0, 1.0));
     }
 
     fn layer_visuals(&self) -> BTreeMap<String, fin::dashboard::LayerVisual> {
@@ -692,6 +712,7 @@ impl DashboardVisualState {
                     fin::dashboard::LayerVisual {
                         level,
                         scope: scope.clone(),
+                        peak: self.layer_peaks.get(layer).copied().unwrap_or(0.0),
                     },
                 )
             })

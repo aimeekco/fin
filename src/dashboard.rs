@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier as StyleModifier, Style};
+use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap};
 
@@ -14,6 +14,7 @@ use crate::osc::event_gain;
 
 const METER_WIDTH: usize = 30;
 const TRANSPORT_WIDTH: usize = 32;
+const MASTER_WIDTH: usize = 48;
 const SCOPE_WIDTH: usize = 24;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +25,7 @@ pub struct DashboardState {
     pub osc_status: String,
     pub watcher_status: String,
     pub master_scope: String,
+    pub master_peak: f32,
     pub transport: TransportRow,
     pub layers: Vec<LayerRow>,
     pub logs: Vec<String>,
@@ -37,6 +39,7 @@ pub struct DashboardRuntime {
     pub bar_progress: f32,
     pub pending_reload: bool,
     pub master_scope: String,
+    pub master_peak: f32,
     pub layer_visuals: BTreeMap<String, LayerVisual>,
 }
 
@@ -45,6 +48,7 @@ pub struct TransportRow {
     pub label: String,
     pub phase_bar: String,
     pub playhead_bar: String,
+    pub pulse_bar: String,
     pub hits: usize,
 }
 
@@ -52,6 +56,7 @@ pub struct TransportRow {
 pub struct LayerVisual {
     pub level: f32,
     pub scope: String,
+    pub peak: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -61,6 +66,7 @@ pub struct LayerRow {
     pub scope: String,
     pub hits: usize,
     pub detail: String,
+    pub peak: f32,
 }
 
 pub fn build_dashboard_state(
@@ -81,7 +87,8 @@ pub fn build_dashboard_state(
         osc_status: runtime.osc_status,
         watcher_status: runtime.watcher_status,
         master_scope: runtime.master_scope,
-        transport: build_transport_row(runtime.bar_index, runtime.bar_progress, events),
+        master_peak: runtime.master_peak,
+        transport: build_transport_row(runtime.bar_index, runtime.bar_progress, runtime.master_peak, events),
         layers: build_layer_rows(program, events, &runtime.layer_visuals),
         logs,
     }
@@ -128,6 +135,7 @@ pub fn build_layer_rows(
                 scope: visual.scope,
                 hits,
                 detail: layer_detail(layer),
+                peak: visual.peak,
             }
         })
         .collect()
@@ -149,7 +157,8 @@ pub fn render_dashboard(frame: &mut Frame<'_>, area: Rect, state: &DashboardStat
 
     let sections = Layout::vertical([
         Constraint::Length(3),
-        Constraint::Length(2),
+        Constraint::Length(4),
+        Constraint::Length(5),
         Constraint::Min(8),
         Constraint::Min(6),
         Constraint::Length(1),
@@ -169,20 +178,71 @@ pub fn render_dashboard(frame: &mut Frame<'_>, area: Rect, state: &DashboardStat
     frame.render_widget(header, sections[0]);
 
     render_transport(frame, sections[1], &state.transport);
-    render_layers(frame, sections[2], &state.layers);
-    render_logs(frame, sections[3], &state.logs);
-    frame.render_widget(Paragraph::new("q quit"), sections[4]);
+    render_master(frame, sections[2], state);
+    render_layers(frame, sections[3], &state.layers);
+    render_logs(frame, sections[4], &state.logs);
+    frame.render_widget(Paragraph::new("q quit"), sections[5]);
 }
 
 fn render_transport(frame: &mut Frame<'_>, area: Rect, transport: &TransportRow) {
     let block = Block::default().borders(Borders::TOP).title(" TRANSPORT ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let line = Line::from(format!(
-        "{} | {} | {} | hits {}",
-        transport.label, transport.phase_bar, transport.playhead_bar, transport.hits
-    ));
-    frame.render_widget(Paragraph::new(line), inner);
+    let text = vec![
+        Line::from(vec![
+            Span::styled(
+                transport.label.clone(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(StyleModifier::BOLD),
+            ),
+            Span::raw("  hits "),
+            Span::styled(
+                format!("{:>3}", transport.hits),
+                Style::default().fg(Color::Yellow),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("grid ", Style::default().fg(Color::DarkGray)),
+            Span::styled(transport.phase_bar.clone(), Style::default().fg(Color::Blue)),
+        ]),
+        Line::from(vec![
+            Span::styled("head ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                transport.playhead_bar.clone(),
+                Style::default().fg(Color::Magenta),
+            ),
+            Span::raw(" "),
+            Span::styled("pulse ", Style::default().fg(Color::DarkGray)),
+            Span::styled(transport.pulse_bar.clone(), Style::default().fg(Color::Yellow)),
+        ]),
+    ];
+    frame.render_widget(Paragraph::new(text), inner);
+}
+
+fn render_master(frame: &mut Frame<'_>, area: Rect, state: &DashboardState) {
+    let block = Block::default().borders(Borders::TOP).title(" MASTER ");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let energy = energy_bar(MASTER_WIDTH, scope_level(&state.master_scope), state.master_peak);
+    let phase = phase_wave(MASTER_WIDTH, state.transport.hits, state.master_peak);
+    let text = vec![
+        Line::from(vec![
+            Span::styled("trail ", Style::default().fg(Color::DarkGray)),
+            Span::styled(state.master_scope.clone(), Style::default().fg(Color::Cyan)),
+        ]),
+        Line::from(vec![
+            Span::styled("energy ", Style::default().fg(Color::DarkGray)),
+            Span::styled(energy, Style::default().fg(Color::Green)),
+        ]),
+        Line::from(vec![
+            Span::styled("phase ", Style::default().fg(Color::DarkGray)),
+            Span::styled(phase, Style::default().fg(Color::Magenta)),
+        ]),
+    ];
+
+    frame.render_widget(Paragraph::new(text), inner);
 }
 
 fn render_layers(frame: &mut Frame<'_>, area: Rect, layers: &[LayerRow]) {
@@ -191,11 +251,22 @@ fn render_layers(frame: &mut Frame<'_>, area: Rect, layers: &[LayerRow]) {
     frame.render_widget(block, area);
 
     let rows = layers.iter().map(|layer| {
+        let accent = if layer.peak > 0.85 {
+            Color::Yellow
+        } else if layer.peak > 0.5 {
+            Color::Cyan
+        } else {
+            Color::DarkGray
+        };
         Row::new(vec![
-            Cell::from(layer.label.clone()),
-            Cell::from(layer.meter.clone()),
-            Cell::from(layer.scope.clone()),
-            Cell::from(format!("{:>3}", layer.hits)),
+            Cell::from(layer.label.clone()).style(
+                Style::default()
+                    .fg(accent)
+                    .add_modifier(StyleModifier::BOLD),
+            ),
+            Cell::from(layer.meter.clone()).style(Style::default().fg(accent)),
+            Cell::from(layer.scope.clone()).style(Style::default().fg(Color::Green)),
+            Cell::from(format!("{:>3}", layer.hits)).style(Style::default().fg(Color::Yellow)),
             Cell::from(layer.detail.clone()),
         ])
     });
@@ -230,21 +301,21 @@ fn meter_bar(ratio: f32, live_level: f32, hits: usize) -> String {
     let peak = (live_level.clamp(0.0, 1.0) * METER_WIDTH as f32).round() as usize;
     let mut meter = String::with_capacity(METER_WIDTH);
     let accent = match hits {
-        0 => ' ',
-        1..=2 => '.',
-        3..=4 => ':',
-        5..=8 => '=',
-        _ => '#',
+        0 => '·',
+        1..=2 => '░',
+        3..=4 => '▒',
+        5..=8 => '▓',
+        _ => '█',
     };
     for index in 0..METER_WIDTH {
         let ch = if index < filled && index < peak {
-            '#'
+            '█'
         } else if index < peak {
-            '|'
+            '▌'
         } else if index < filled {
             accent
         } else {
-            ' '
+            '·'
         };
         meter.push(ch);
     }
@@ -254,31 +325,37 @@ fn meter_bar(ratio: f32, live_level: f32, hits: usize) -> String {
 fn build_transport_row(
     bar_index: usize,
     bar_progress: f32,
+    master_peak: f32,
     events: &[ScheduledEvent],
 ) -> TransportRow {
-    let mut cells = vec!['.'; TRANSPORT_WIDTH];
+    let mut cells = vec!['·'; TRANSPORT_WIDTH];
+    for beat in (0..TRANSPORT_WIDTH).step_by((TRANSPORT_WIDTH / 4).max(1)) {
+        cells[beat] = '┆';
+    }
     for event in events {
         let index = ((event.bar_pos.clamp(0.0, 0.999_9)) * TRANSPORT_WIDTH as f32).floor() as usize;
         let cell = cells
             .get_mut(index.min(TRANSPORT_WIDTH - 1))
             .expect("index should be in range");
         *cell = match *cell {
-            '.' => ':',
-            ':' => '=',
-            '=' => '#',
-            '#' => '#',
-            _ => '#',
+            '·' | '┆' => '░',
+            '░' => '▒',
+            '▒' => '▓',
+            '▓' => '█',
+            _ => '█',
         };
     }
     let mut playhead = vec![' '; TRANSPORT_WIDTH];
     let playhead_index =
         ((bar_progress.clamp(0.0, 0.999_9)) * TRANSPORT_WIDTH as f32).floor() as usize;
-    playhead[playhead_index.min(TRANSPORT_WIDTH - 1)] = '^';
+    playhead[playhead_index.min(TRANSPORT_WIDTH - 1)] = '◆';
+    let pulse = pulse_bar(TRANSPORT_WIDTH, master_peak);
 
     TransportRow {
         label: format!("BAR {:03}", bar_index + 1),
         phase_bar: format!("[{}]", cells.into_iter().collect::<String>()),
         playhead_bar: format!("[{}]", playhead.into_iter().collect::<String>()),
+        pulse_bar: pulse,
         hits: events.len(),
     }
 }
@@ -302,7 +379,66 @@ fn empty_visual() -> LayerVisual {
     LayerVisual {
         level: 0.0,
         scope: " ".repeat(SCOPE_WIDTH),
+        peak: 0.0,
     }
+}
+
+fn energy_bar(width: usize, level: f32, peak: f32) -> String {
+    let filled = (level.clamp(0.0, 1.0) * width as f32).round() as usize;
+    let flash = (peak.clamp(0.0, 1.0) * width as f32).round() as usize;
+    let mut bar = String::with_capacity(width);
+    for index in 0..width {
+        bar.push(if index < flash {
+            '█'
+        } else if index < filled {
+            '▓'
+        } else {
+            '·'
+        });
+    }
+    bar
+}
+
+fn phase_wave(width: usize, hits: usize, peak: f32) -> String {
+    let mut phase = String::with_capacity(width);
+    let accent = if peak > 0.75 {
+        '◈'
+    } else if hits > 0 {
+        '◇'
+    } else {
+        '•'
+    };
+    for index in 0..width {
+        phase.push(if index % 8 == 0 { accent } else { '─' });
+    }
+    phase
+}
+
+fn pulse_bar(width: usize, peak: f32) -> String {
+    let active = (peak.clamp(0.0, 1.0) * width as f32).round() as usize;
+    let mut pulse = String::with_capacity(width + 2);
+    pulse.push('[');
+    for index in 0..width {
+        pulse.push(if index < active { '█' } else { '·' });
+    }
+    pulse.push(']');
+    pulse
+}
+
+fn scope_level(scope: &str) -> f32 {
+    scope
+        .chars()
+        .last()
+        .map(|ch| match ch {
+            ' ' => 0.0,
+            '.' => 0.2,
+            ':' => 0.4,
+            '=' => 0.6,
+            '#' => 0.8,
+            '@' => 1.0,
+            _ => 0.0,
+        })
+        .unwrap_or(0.0)
 }
 
 fn layer_detail(layer: &Layer) -> String {
@@ -495,7 +631,7 @@ mod tests {
         assert_eq!(rows[0].label, "[fin]");
         assert!(rows[0].detail.contains("bar1 /4 self"));
         assert_eq!(rows[0].hits, 1);
-        assert!(rows[1].meter.len() == METER_WIDTH);
+        assert_eq!(rows[1].meter.chars().count(), METER_WIDTH);
     }
 
     #[test]
@@ -629,6 +765,7 @@ mod tests {
         let transport = build_transport_row(
             2,
             0.5,
+            0.8,
             &[ScheduledEvent {
                 layer: Symbol("bd".to_string()),
                 sound: SoundTarget {
@@ -642,8 +779,9 @@ mod tests {
         );
 
         assert_eq!(transport.label, "BAR 003");
-        assert!(transport.phase_bar.contains(':'));
-        assert!(transport.playhead_bar.contains('^'));
+        assert!(transport.phase_bar.contains('░'));
+        assert!(transport.playhead_bar.contains('◆'));
+        assert!(transport.pulse_bar.contains('█'));
         assert_eq!(transport.hits, 1);
     }
 
