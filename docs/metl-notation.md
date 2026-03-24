@@ -11,6 +11,7 @@ The current parser supports:
 - layer headers like `[bd]` and `[sd:2]`
 - optional layer-wide effect params: `.gain`, `.pan`, `.speed`, `.sustain`
 - indented per-layer fallback entries like `[default]`
+- indented periodic entries like `[bar%4]`
 - indented per-bar entries like `[bar1]`
 - bar-local timing operators: `/n`, `*n`, `<< n`, `>> n`
 - atom patterns like `hh` or `sd:2`
@@ -36,6 +37,7 @@ bars = 4
 [sd] .gain 0.8
   [default] /2 >> 0.25
   [bar2] /1
+  [bar%4] /4 <0 2 4 6>
 
 [hh] .pan 0.2
   [default] *4 [hh hh:2]
@@ -58,18 +60,22 @@ Layers are declared first, then given one or more indented bar definitions:
 ```ini
 [bd]
   [default] /4 <0 3 5 7>
+  [bar%4] /8 <0 7 0 7 0 7 0 7>
   [bar2] /2 <0 5>
 ```
 
 - `[bd]` declares the layer and its default sound target
-- `[default]` plays on every bar unless a more specific `[barN]` exists
+- `[default]` plays on every bar unless a more specific bar selector exists
+- `[bar%N]` plays on bars divisible by `N`, so `[bar%4]` applies on bars `4, 8, 12, ...`
 - `[barN]` defines the pattern for that specific bar in the phrase
-- if a layer omits both `[default]` and a specific bar, that layer is silent on that bar
+- precedence is `[barN]` > `[bar%N]` > `[default]`
+- if multiple periodic selectors match, the largest `N` wins
+- if a layer has no matching `[barN]`, `[bar%N]`, or `[default]`, that layer is silent on that bar
 - after the last bar, the phrase loops back to `bar1`
 
 ## Pattern Forms
 
-Patterns live on the `[barN]` line.
+Patterns live on the `[default]`, `[bar%N]`, or `[barN]` line.
 
 Atom patterns:
 
@@ -110,7 +116,7 @@ Sequence semantics:
 
 ## Timing Operators
 
-Timing operators are bar-local. They belong on `[barN]`, not on the layer header.
+Timing operators are bar-local. They belong on `[default]`, `[bar%N]`, or `[barN]`, not on the layer header.
 
 ```ini
 [bd]

@@ -35,5 +35,12 @@ bars = 32
     [bar31] <b4 g4 fs5 b4 g4 fs5 b4 g4>
     [bar32] <fs5 b4 g4 fs5 b4 g4 d5 g4>
 
-[hh] .gain 1.03
+[hh] .gain 1.05
     [default] /8
+
+[supersnare] .gain 0.8
+    [default] /16 <_ _ _ _ 0 _ _ 0 _ _ _ 0 _ _ 0>
+
+[ht] .gain 1.1
+    [bar%4] /8 <0 0 _ _ _ _ _ _>
+    [bar%2] /8 <0 _ _ _ _ _ _ _>

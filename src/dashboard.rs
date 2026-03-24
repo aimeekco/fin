@@ -7,8 +7,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap};
 
 use crate::model::{
-    BarPattern, Layer, Modifier, NoteValue, PatternAtom, PatternSource, PatternValue, Program,
-    ScheduledEvent, DEFAULT_BAR_INDEX,
+    BarPattern, BarSelector, Layer, Modifier, NoteValue, PatternAtom, PatternSource,
+    PatternValue, Program, ScheduledEvent,
 };
 use crate::osc::event_gain;
 
@@ -326,8 +326,8 @@ fn layer_detail(layer: &Layer) -> String {
             layer
                 .bars
                 .iter()
-                .map(|(bar_index, pattern)| {
-                    format!("{} {}", bar_label(*bar_index), bar_pattern_label(pattern))
+                .map(|(bar_selector, pattern)| {
+                    format!("{} {}", bar_label(bar_selector), bar_pattern_label(pattern))
                 }),
         );
     }
@@ -335,12 +335,8 @@ fn layer_detail(layer: &Layer) -> String {
     parts.join(" | ")
 }
 
-fn bar_label(bar_index: u32) -> String {
-    if bar_index == DEFAULT_BAR_INDEX {
-        "[default]".to_string()
-    } else {
-        format!("bar{bar_index}")
-    }
+fn bar_label(bar_selector: &BarSelector) -> String {
+    bar_selector.detail_label()
 }
 
 fn atom_label(atom: &PatternAtom) -> String {
@@ -416,8 +412,8 @@ mod tests {
 
     use super::*;
     use crate::model::{
-        BarPattern, EventParams, Layer, NoteValue, PatternSource, PatternValue, Program,
-        ScheduledEvent, SoundTarget, Symbol,
+        BarPattern, BarSelector, EventParams, Layer, NoteValue, PatternSource, PatternValue,
+        Program, ScheduledEvent, SoundTarget, Symbol,
     };
 
     fn bar(pattern: PatternSource, modifiers: Vec<Modifier>) -> BarPattern {
@@ -442,7 +438,7 @@ mod tests {
                     },
                     modifiers: vec![Modifier::Gain(0.8)],
                     bars: BTreeMap::from([(
-                        1,
+                        BarSelector::Exact(1),
                         bar(PatternSource::ImplicitSelf, vec![Modifier::Divide(4)]),
                     )]),
                     source_line: 1,
@@ -455,7 +451,7 @@ mod tests {
                     },
                     modifiers: Vec::new(),
                     bars: BTreeMap::from([(
-                        2,
+                        BarSelector::Exact(2),
                         bar(PatternSource::ImplicitSelf, vec![Modifier::Multiply(16)]),
                     )]),
                     source_line: 2,
@@ -512,7 +508,7 @@ mod tests {
             },
             modifiers: vec![Modifier::Pan(0.2), Modifier::Sustain(0.15)],
             bars: BTreeMap::from([(
-                1,
+                BarSelector::Exact(1),
                 bar(
                     PatternSource::Group(vec![
                         PatternAtom::Sound(SoundTarget {
@@ -545,7 +541,7 @@ mod tests {
             },
             modifiers: Vec::new(),
             bars: BTreeMap::from([(
-                1,
+                BarSelector::Exact(1),
                 bar(
                     PatternSource::Sequence(vec![
                         PatternValue::Note(NoteValue {
@@ -578,7 +574,7 @@ mod tests {
             },
             modifiers: Vec::new(),
             bars: BTreeMap::from([(
-                DEFAULT_BAR_INDEX,
+                BarSelector::Default,
                 bar(PatternSource::ImplicitSelf, vec![Modifier::Divide(4)]),
             )]),
             source_line: 1,
@@ -586,6 +582,26 @@ mod tests {
 
         let detail = layer_detail(&layer);
         assert!(detail.contains("[default] /4 self"));
+    }
+
+    #[test]
+    fn layer_detail_labels_periodic_bar() {
+        let layer = Layer {
+            name: Symbol("bd".to_string()),
+            default_target: SoundTarget {
+                name: "bd".to_string(),
+                index: None,
+            },
+            modifiers: Vec::new(),
+            bars: BTreeMap::from([(
+                BarSelector::Every(4),
+                bar(PatternSource::ImplicitSelf, vec![Modifier::Divide(4)]),
+            )]),
+            source_line: 1,
+        };
+
+        let detail = layer_detail(&layer);
+        assert!(detail.contains("[bar%4] /4 self"));
     }
 
     #[test]

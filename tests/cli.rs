@@ -191,6 +191,25 @@ fn run_accepts_default_bar_definition() {
 }
 
 #[test]
+fn run_accepts_periodic_bar_definition() {
+    let path = temp_file_path("metl");
+    fs::write(&path, "bpm = 120\nbars = 4\n[bd]\n  [bar%2] /1 <0>\n")
+        .expect("should write test file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fin"))
+        .arg("run")
+        .arg("--no-play")
+        .arg(&path)
+        .output()
+        .expect("command should run");
+
+    fs::remove_file(&path).expect("should clean up temp file");
+
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "bpm=120\nbars=4\n");
+}
+
+#[test]
 fn run_prints_note_sequence_body() {
     let path = temp_file_path("metl");
     fs::write(&path, "bpm = 120\n[bass]\n  [bar1] <g4 a4 a3 c3>\n")

@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-pub const DEFAULT_BAR_INDEX: u32 = 0;
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Symbol(pub String);
 
@@ -34,15 +32,54 @@ pub struct Layer {
     pub name: Symbol,
     pub default_target: SoundTarget,
     pub modifiers: Vec<Modifier>,
-    pub bars: BTreeMap<u32, BarPattern>,
+    pub bars: BTreeMap<BarSelector, BarPattern>,
     pub source_line: usize,
 }
 
 impl Layer {
     pub fn bar_for_phrase(&self, phrase_bar: u32) -> Option<&BarPattern> {
         self.bars
-            .get(&phrase_bar)
-            .or_else(|| self.bars.get(&DEFAULT_BAR_INDEX))
+            .get(&BarSelector::Exact(phrase_bar))
+            .or_else(|| {
+                self.bars
+                    .iter()
+                    .filter_map(|(selector, pattern)| match selector {
+                        BarSelector::Every(divisor)
+                            if phrase_bar.is_multiple_of(*divisor) =>
+                        {
+                            Some((divisor, pattern))
+                        }
+                        _ => None,
+                    })
+                    .max_by_key(|(divisor, _)| *divisor)
+                    .map(|(_, pattern)| pattern)
+            })
+            .or_else(|| self.bars.get(&BarSelector::Default))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum BarSelector {
+    Default,
+    Every(u32),
+    Exact(u32),
+}
+
+impl BarSelector {
+    pub fn header_label(&self) -> String {
+        match self {
+            Self::Default => "[default]".to_string(),
+            Self::Every(value) => format!("[bar%{value}]"),
+            Self::Exact(value) => format!("[bar{value}]"),
+        }
+    }
+
+    pub fn detail_label(&self) -> String {
+        match self {
+            Self::Default => "[default]".to_string(),
+            Self::Every(value) => format!("[bar%{value}]"),
+            Self::Exact(value) => format!("bar{value}"),
+        }
     }
 }
 

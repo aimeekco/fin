@@ -13,8 +13,8 @@ use nom::number::complete::recognize_float;
 use nom::sequence::{delimited, preceded, separated_pair};
 
 use crate::model::{
-    BarPattern, Layer, Modifier, NoteValue, PatternAtom, PatternSource, PatternValue, Program,
-    SoundTarget, Symbol, DEFAULT_BAR_INDEX,
+    BarPattern, BarSelector, Layer, Modifier, NoteValue, PatternAtom, PatternSource,
+    PatternValue, Program, SoundTarget, Symbol,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,15 +106,11 @@ pub fn parse_program(input: &str) -> Result<Program, ParseError> {
                 line: line_no,
                 message: "indented content must follow a layer".to_string(),
             })?;
-            let (bar_index, bar_pattern) = parse_bar_statement(line, line_no)?;
-            if layer.bars.insert(bar_index, bar_pattern).is_some() {
+            let (bar_selector, bar_pattern) = parse_bar_statement(line, line_no)?;
+            if layer.bars.insert(bar_selector.clone(), bar_pattern).is_some() {
                 return Err(ParseError {
                     line: line_no,
-                    message: if bar_index == DEFAULT_BAR_INDEX {
-                        "duplicate `[default]` definition".to_string()
-                    } else {
-                        format!("duplicate `[bar{bar_index}]` definition")
-                    },
+                    message: format!("duplicate `{}` definition", bar_selector.header_label()),
                 });
             }
         }
@@ -132,12 +128,21 @@ pub fn parse_program(input: &str) -> Result<Program, ParseError> {
 fn validate_program(program: &Program) -> Result<(), ParseError> {
     let max_bars = program.effective_bars();
     for layer in &program.layers {
-        for (&bar_index, bar) in &layer.bars {
-            if bar_index != DEFAULT_BAR_INDEX && bar_index > max_bars {
-                return Err(ParseError {
-                    line: bar.source_line,
-                    message: format!("`[bar{bar_index}]` is out of range for bars={max_bars}"),
-                });
+        for (bar_selector, bar) in &layer.bars {
+            match bar_selector {
+                BarSelector::Exact(bar_index) if *bar_index > max_bars => {
+                    return Err(ParseError {
+                        line: bar.source_line,
+                        message: format!("`[bar{bar_index}]` is out of range for bars={max_bars}"),
+                    });
+                }
+                BarSelector::Every(value) if *value < 2 => {
+                    return Err(ParseError {
+                        line: bar.source_line,
+                        message: "`[bar%N]` requires N >= 2".to_string(),
+                    });
+                }
+                _ => {}
             }
         }
     }
@@ -185,8 +190,11 @@ fn parse_layer_statement(line: &str, line_no: usize) -> Result<Layer, ParseError
     })
 }
 
-fn parse_bar_statement(line: &str, line_no: usize) -> Result<(u32, BarPattern), ParseError> {
-    let (_, (bar_index, items)) = all_consuming((
+fn parse_bar_statement(
+    line: &str,
+    line_no: usize,
+) -> Result<(BarSelector, BarPattern), ParseError> {
+    let (_, (bar_selector, items)) = all_consuming((
         bar_header,
         many0(preceded(multispace1, bar_item)),
     ))
@@ -217,7 +225,7 @@ fn parse_bar_statement(line: &str, line_no: usize) -> Result<(u32, BarPattern), 
     }
 
     Ok((
-        bar_index,
+        bar_selector,
         BarPattern {
             pattern,
             modifiers,
@@ -240,16 +248,34 @@ fn layer_header(input: &str) -> IResult<&str, SoundTarget> {
     delimited(char('['), sound_target, char(']')).parse(input)
 }
 
-fn bar_header(input: &str) -> IResult<&str, u32> {
+fn bar_header(input: &str) -> IResult<&str, BarSelector> {
     alt((
-        map(tag("[default]"), |_| DEFAULT_BAR_INDEX),
-        delimited(tag("[bar"), unsigned_value, char(']')),
+        map(tag("[default]"), |_| BarSelector::Default),
+        map(
+            delimited(tag("[bar%"), every_value, char(']')),
+            BarSelector::Every,
+        ),
+        map(
+            delimited(tag("[bar"), unsigned_value, char(']')),
+            BarSelector::Exact,
+        ),
     ))
     .parse(input)
 }
 
 fn unsigned_value(input: &str) -> IResult<&str, u32> {
     map_res(digit1, str::parse::<u32>).parse(input)
+}
+
+fn every_value(input: &str) -> IResult<&str, u32> {
+    map_res(digit1, |value: &str| {
+        let parsed = value.parse::<u32>().map_err(|_| "invalid periodic value")?;
+        if parsed < 2 {
+            return Err("periodic value must be at least 2");
+        }
+        Ok::<u32, &'static str>(parsed)
+    })
+    .parse(input)
 }
 
 fn float_value(input: &str) -> IResult<&str, f32> {
@@ -581,7 +607,10 @@ mod tests {
     fn parses_bar_pattern_with_subdivision_and_atom_sequence() {
         let program = parse_program("bars = 4\n[bd]\n  [bar1] /4 <0 3 5 7>\n")
             .expect("parse should succeed");
-        let bar = program.layers[0].bars.get(&1).expect("bar should exist");
+        let bar = program.layers[0]
+            .bars
+            .get(&BarSelector::Exact(1))
+            .expect("bar should exist");
         assert_eq!(bar.modifiers, vec![Modifier::Divide(4)]);
         assert_eq!(
             bar.pattern,
@@ -598,7 +627,10 @@ mod tests {
     fn parses_bar_pattern_with_note_sequence() {
         let program =
             parse_program("[bass]\n  [bar1] /1 <g4 a4 a3 c3>\n").expect("parse should succeed");
-        let bar = program.layers[0].bars.get(&1).expect("bar should exist");
+        let bar = program.layers[0]
+            .bars
+            .get(&BarSelector::Exact(1))
+            .expect("bar should exist");
         assert_eq!(bar.modifiers, vec![Modifier::Divide(1)]);
         match &bar.pattern {
             PatternSource::Sequence(values) => assert!(matches!(values[0], PatternValue::Note(_))),
@@ -610,7 +642,10 @@ mod tests {
     fn parses_compact_hit_rest_grid_sequence() {
         let program =
             parse_program("[bd]\n  [bar1] /16 <xxxoxxxxxxxooxxxo>\n").expect("parse should succeed");
-        let bar = program.layers[0].bars.get(&1).expect("bar should exist");
+        let bar = program.layers[0]
+            .bars
+            .get(&BarSelector::Exact(1))
+            .expect("bar should exist");
         assert_eq!(bar.modifiers, vec![Modifier::Divide(16)]);
         assert_eq!(
             bar.pattern,
@@ -640,7 +675,10 @@ mod tests {
     fn parses_spaced_restful_note_sequence() {
         let program =
             parse_program("[bass]\n  [bar1] /1 <g4 x a4 x>\n").expect("parse should succeed");
-        let bar = program.layers[0].bars.get(&1).expect("bar should exist");
+        let bar = program.layers[0]
+            .bars
+            .get(&BarSelector::Exact(1))
+            .expect("bar should exist");
         assert_eq!(
             bar.pattern,
             PatternSource::Sequence(vec![
@@ -664,8 +702,19 @@ mod tests {
             parse_program("[bd]\n  [default] /4 <0 3 5 7>\n").expect("parse should succeed");
         let bar = program.layers[0]
             .bars
-            .get(&DEFAULT_BAR_INDEX)
+            .get(&BarSelector::Default)
             .expect("default bar should exist");
+        assert_eq!(bar.modifiers, vec![Modifier::Divide(4)]);
+    }
+
+    #[test]
+    fn parses_periodic_bar_pattern() {
+        let program =
+            parse_program("[bd]\n  [bar%4] /4 <0 3 5 7>\n").expect("parse should succeed");
+        let bar = program.layers[0]
+            .bars
+            .get(&BarSelector::Every(4))
+            .expect("periodic bar should exist");
         assert_eq!(bar.modifiers, vec![Modifier::Divide(4)]);
     }
 
@@ -688,6 +737,19 @@ mod tests {
         let error = parse_program("[bd]\n  [default] /1\n  [default] /2\n")
             .expect_err("parse should fail");
         assert!(error.message.contains("[default]"));
+    }
+
+    #[test]
+    fn rejects_duplicate_periodic_definition() {
+        let error = parse_program("[bd]\n  [bar%4] /1\n  [bar%4] /2\n")
+            .expect_err("parse should fail");
+        assert!(error.message.contains("[bar%4]"));
+    }
+
+    #[test]
+    fn rejects_invalid_periodic_definition() {
+        let error = parse_program("[bd]\n  [bar%1] /1\n").expect_err("parse should fail");
+        assert!(error.message.contains("invalid bar statement"));
     }
 
     #[test]

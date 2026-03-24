@@ -148,9 +148,7 @@ fn collect_layer_params(modifiers: &[Modifier]) -> Result<EventParams, ScheduleE
             Modifier::Speed(value) => params.speed = Some(*value),
             Modifier::Sustain(value) => params.sustain = Some(*value),
             Modifier::Divide(_) | Modifier::Multiply(_) | Modifier::Shift(_) => {
-                return Err(ScheduleError::new(
-                    "rhythmic modifiers are only allowed inside `[barN]` entries",
-                ));
+                return Err(ScheduleError::new("rhythmic modifiers are only allowed inside bar entries"));
             }
         }
     }
@@ -281,7 +279,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::model::{BarPattern, NoteValue, PatternValue, Program, SoundTarget, Symbol};
+    use crate::model::{BarPattern, BarSelector, NoteValue, PatternValue, Program, SoundTarget, Symbol};
 
     fn bar(pattern: PatternSource, modifiers: Vec<Modifier>) -> BarPattern {
         BarPattern {
@@ -291,7 +289,7 @@ mod tests {
         }
     }
 
-    fn layer(name: &str, bars: &[(u32, BarPattern)]) -> Layer {
+    fn layer(name: &str, bars: &[(BarSelector, BarPattern)]) -> Layer {
         Layer {
             name: Symbol(name.to_string()),
             default_target: SoundTarget {
@@ -312,7 +310,7 @@ mod tests {
             layers: vec![layer(
                 "bd",
                 &[(
-                    1,
+                    BarSelector::Exact(1),
                     bar(
                         PatternSource::Sequence(vec![
                             PatternValue::Atom(PatternAtom::SampleIndex(0)),
@@ -342,7 +340,7 @@ mod tests {
             layers: vec![layer(
                 "bass",
                 &[(
-                    1,
+                    BarSelector::Exact(1),
                     bar(
                         PatternSource::Sequence(vec![
                             PatternValue::Note(NoteValue {
@@ -373,7 +371,7 @@ mod tests {
             layers: vec![layer(
                 "bd",
                 &[(
-                    1,
+                    BarSelector::Exact(1),
                     bar(
                         PatternSource::Sequence(vec![
                             PatternValue::Rest,
@@ -413,7 +411,7 @@ mod tests {
             layers: vec![layer(
                 "bass",
                 &[(
-                    1,
+                    BarSelector::Exact(1),
                     bar(
                         PatternSource::Sequence(vec![
                             PatternValue::Note(NoteValue {
@@ -451,7 +449,7 @@ mod tests {
             layers: vec![layer(
                 "bd",
                 &[(
-                    1,
+                    BarSelector::Exact(1),
                     bar(PatternSource::ImplicitSelf, vec![Modifier::Divide(1)]),
                 )],
             )],
@@ -469,7 +467,7 @@ mod tests {
             layers: vec![layer(
                 "bd",
                 &[(
-                    crate::model::DEFAULT_BAR_INDEX,
+                    BarSelector::Default,
                     bar(
                         PatternSource::Atom(PatternAtom::SampleIndex(7)),
                         vec![Modifier::Divide(1)],
@@ -492,14 +490,14 @@ mod tests {
                 "bd",
                 &[
                     (
-                        crate::model::DEFAULT_BAR_INDEX,
+                        BarSelector::Default,
                         bar(
                             PatternSource::Atom(PatternAtom::SampleIndex(7)),
                             vec![Modifier::Divide(1)],
                         ),
                     ),
                     (
-                        2,
+                        BarSelector::Exact(2),
                         bar(
                             PatternSource::Atom(PatternAtom::SampleIndex(3)),
                             vec![Modifier::Divide(1)],
@@ -515,6 +513,93 @@ mod tests {
     }
 
     #[test]
+    fn periodic_bar_definition_applies_on_matching_phrase_bars() {
+        let program = Program {
+            bpm: Some(128.0),
+            bars: Some(8),
+            layers: vec![layer(
+                "bd",
+                &[(
+                    BarSelector::Every(4),
+                    bar(
+                        PatternSource::Atom(PatternAtom::SampleIndex(7)),
+                        vec![Modifier::Divide(1)],
+                    ),
+                )],
+            )],
+        };
+
+        let non_match = schedule_bar(&program, Meter::default(), 2).expect("schedule should work");
+        let match_bar = schedule_bar(&program, Meter::default(), 3).expect("schedule should work");
+
+        assert!(non_match.is_empty());
+        assert_eq!(match_bar.len(), 1);
+        assert_eq!(match_bar[0].sound.display_name(), "bd:7");
+    }
+
+    #[test]
+    fn more_specific_periodic_bar_definition_wins() {
+        let program = Program {
+            bpm: Some(128.0),
+            bars: Some(8),
+            layers: vec![layer(
+                "bd",
+                &[
+                    (
+                        BarSelector::Every(2),
+                        bar(
+                            PatternSource::Atom(PatternAtom::SampleIndex(2)),
+                            vec![Modifier::Divide(1)],
+                        ),
+                    ),
+                    (
+                        BarSelector::Every(4),
+                        bar(
+                            PatternSource::Atom(PatternAtom::SampleIndex(4)),
+                            vec![Modifier::Divide(1)],
+                        ),
+                    ),
+                ],
+            )],
+        };
+
+        let events = schedule_bar(&program, Meter::default(), 3).expect("schedule should work");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].sound.display_name(), "bd:4");
+    }
+
+    #[test]
+    fn exact_bar_definition_overrides_periodic_bar_definition() {
+        let program = Program {
+            bpm: Some(128.0),
+            bars: Some(8),
+            layers: vec![layer(
+                "bd",
+                &[
+                    (
+                        BarSelector::Every(4),
+                        bar(
+                            PatternSource::Atom(PatternAtom::SampleIndex(4)),
+                            vec![Modifier::Divide(1)],
+                        ),
+                    ),
+                    (
+                        BarSelector::Exact(4),
+                        bar(
+                            PatternSource::Atom(PatternAtom::SampleIndex(9)),
+                            vec![Modifier::Divide(1)],
+                        ),
+                    ),
+                ],
+            )],
+        };
+
+        let events = schedule_bar(&program, Meter::default(), 3).expect("schedule should work");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].sound.display_name(), "bd:9");
+    }
+
+    #[test]
     fn loops_back_to_first_phrase_bar() {
         let program = Program {
             bpm: Some(128.0),
@@ -523,11 +608,11 @@ mod tests {
                 "bd",
                 &[
                     (
-                        1,
+                        BarSelector::Exact(1),
                         bar(PatternSource::Atom(PatternAtom::SampleIndex(0)), vec![]),
                     ),
                     (
-                        2,
+                        BarSelector::Exact(2),
                         bar(PatternSource::Atom(PatternAtom::SampleIndex(3)), vec![]),
                     ),
                 ],
@@ -547,7 +632,7 @@ mod tests {
         let mut layer = layer(
             "hh",
             &[(
-                1,
+                BarSelector::Exact(1),
                 bar(PatternSource::ImplicitSelf, vec![Modifier::Divide(1)]),
             )],
         );
