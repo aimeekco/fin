@@ -177,7 +177,8 @@ pub fn render_dashboard(frame: &mut Frame<'_>, area: Rect, state: &DashboardStat
         Constraint::Length(4),
         Constraint::Length(5),
         Constraint::Min(8),
-        Constraint::Min(10),
+        Constraint::Length(3),
+        Constraint::Min(8),
         Constraint::Length(1),
     ])
     .split(inner);
@@ -197,8 +198,9 @@ pub fn render_dashboard(frame: &mut Frame<'_>, area: Rect, state: &DashboardStat
     render_transport(frame, sections[1], &state.transport);
     render_master(frame, sections[2], state);
     render_layers(frame, sections[3], &state.layers);
-    render_bottom_art(frame, sections[4], &state.bottom_art);
-    frame.render_widget(Paragraph::new("q quit"), sections[5]);
+    render_logs(frame, sections[4], &state.logs);
+    render_bottom_art(frame, sections[5], &state.bottom_art);
+    frame.render_widget(Paragraph::new("q quit"), sections[6]);
 }
 
 fn render_transport(frame: &mut Frame<'_>, area: Rect, transport: &TransportRow) {
@@ -306,6 +308,28 @@ fn render_bottom_art(frame: &mut Frame<'_>, area: Rect, art: &BottomArt) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
     frame.render_widget(RaveArtWidget { art }, inner);
+}
+
+fn render_logs(frame: &mut Frame<'_>, area: Rect, logs: &[String]) {
+    let block = Block::default().borders(Borders::TOP).title(" LOG STRIP ");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let lines = logs
+        .iter()
+        .rev()
+        .take(2)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .map(|entry| {
+            Line::from(Span::styled(
+                entry.as_str(),
+                Style::default().fg(Color::DarkGray),
+            ))
+        })
+        .collect::<Vec<_>>();
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 fn meter_bar(ratio: f32, live_level: f32, hits: usize) -> String {
