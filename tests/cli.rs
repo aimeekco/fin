@@ -53,7 +53,12 @@ fn sounds_lists_local_names_from_overrides() {
     let samples_root = root.join("samples");
     fs::create_dir(&samples_root).expect("samples root should exist");
     fs::create_dir(samples_root.join("bd")).expect("bd sample should exist");
+    fs::write(samples_root.join("bd").join("0.wav"), "").expect("bd audio should exist");
     fs::create_dir(samples_root.join("808sd")).expect("808sd sample should exist");
+    fs::write(samples_root.join("808sd").join("1.aif"), "").expect("audio should exist");
+    fs::create_dir(samples_root.join("broken")).expect("broken sample should exist");
+    fs::write(samples_root.join("broken").join("notes.txt"), "not audio")
+        .expect("non-audio file should exist");
 
     let superdirt_root = root.join("SuperDirt");
     let synths_dir = superdirt_root.join("synths");
@@ -66,6 +71,7 @@ fn sounds_lists_local_names_from_overrides() {
 
     let output = Command::new(env!("CARGO_BIN_EXE_fin"))
         .arg("sounds")
+        .arg("--plain")
         .env("FIN_DIRT_SAMPLES_ROOT", &samples_root)
         .env("FIN_SUPERDIRT_ROOT", &superdirt_root)
         .output()
@@ -75,10 +81,11 @@ fn sounds_lists_local_names_from_overrides() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("sample 808sd"));
-    assert!(stdout.contains("sample bd"));
-    assert!(stdout.contains("synth superhat"));
-    assert!(stdout.contains("synth from"));
+    assert!(stdout.contains("sample 808sd  808-style snare drum"));
+    assert!(stdout.contains("sample bd  bass drum / kick"));
+    assert!(!stdout.contains("sample broken"));
+    assert!(stdout.contains("synth superhat  SynthDef-backed synth `superhat`"));
+    assert!(stdout.contains("synth from  registered SuperDirt synth `from`"));
 }
 
 #[test]

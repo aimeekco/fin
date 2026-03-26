@@ -1,11 +1,14 @@
 use std::collections::{BTreeMap, VecDeque};
-use std::io::{self, stdout};
+use std::io::{self, IsTerminal, stdin, stdout};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use clap::{Args, Parser, Subcommand};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseButton,
+    MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -16,6 +19,7 @@ use fin::osc::{OscClient, event_gain};
 use fin::parser::parse_program;
 use fin::scheduler::{format_events, schedule_bar, schedule_intro};
 use fin::sounds::{format_sounds_report, load_sounds_report};
+use fin::sounds_tui::{SoundsBrowserState, render_sounds_browser};
 use fin::supercollider::{StartMode, start_superdirt, stop_superdirt, superdirt_status};
 use fin::watcher::FileChangeWatcher;
 use ratatui::Terminal;
@@ -69,7 +73,14 @@ enum Command {
         bars: Option<usize>,
     },
     Superdirt(SuperdirtArgs),
-    Sounds,
+    Sounds {
+        #[arg(long)]
+        plain: bool,
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        #[arg(long, default_value_t = 57120)]
+        port: u16,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -133,7 +144,7 @@ fn run() -> Result<(), String> {
                 start_superdirt(args.sclang, args.port, mode)
             }
         },
-        Command::Sounds => list_sounds(),
+        Command::Sounds { plain, host, port } => list_sounds(plain, host, port),
     }
 }
 
@@ -414,10 +425,140 @@ fn bar_duration(program: &Program, meter: Meter) -> Duration {
     Duration::from_secs_f64(seconds)
 }
 
-fn list_sounds() -> Result<(), String> {
+fn list_sounds(plain: bool, host: String, port: u16) -> Result<(), String> {
     let report = load_sounds_report().map_err(|error| error.to_string())?;
-    println!("{}", format_sounds_report(&report));
+    if plain || !stdin().is_terminal() || !stdout().is_terminal() {
+        println!("{}", format_sounds_report(&report));
+        return Ok(());
+    }
+
+    browse_sounds(&report, &host, port)?;
     Ok(())
+}
+
+fn browse_sounds(report: &fin::sounds::SoundsReport, host: &str, port: u16) -> Result<(), String> {
+    let mut terminal = setup_terminal().map_err(|error| error.to_string())?;
+    let _restore = TerminalRestore;
+    let mut state = SoundsBrowserState::new(report);
+    let preview_client = OscClient::connect(host, port).ok();
+    let mut preview_status = match &preview_client {
+        Some(_) => format!("PREVIEW READY ({host}:{port})"),
+        None => format!("PREVIEW OFFLINE ({host}:{port})"),
+    };
+    let mut search_query = String::new();
+    let mut last_search_at: Option<Instant> = None;
+
+    loop {
+        terminal
+            .draw(|frame| {
+                render_sounds_browser(
+                    frame,
+                    frame.area(),
+                    report,
+                    &state,
+                    &preview_status,
+                    &search_query,
+                )
+            })
+            .map_err(|error| error.to_string())?;
+
+        if !event::poll(Duration::from_millis(50)).map_err(|error| error.to_string())? {
+            continue;
+        }
+
+        match event::read().map_err(|error| error.to_string())? {
+            Event::Key(key) => {
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+
+                match key.code {
+                    KeyCode::Char('q') => return Ok(()),
+                    KeyCode::Tab => {
+                        state.next_focus();
+                        search_query.clear();
+                    }
+                    KeyCode::BackTab => {
+                        state.previous_focus();
+                        search_query.clear();
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => state.move_up(report),
+                    KeyCode::Down | KeyCode::Char('j') => state.move_down(report),
+                    KeyCode::Right | KeyCode::Char(']') => {
+                        state.next_tab();
+                        search_query.clear();
+                    }
+                    KeyCode::Left | KeyCode::Char('[') => {
+                        state.previous_tab();
+                        search_query.clear();
+                    }
+                    KeyCode::Esc => {
+                        search_query.clear();
+                    }
+                    KeyCode::Backspace => {
+                        search_query.pop();
+                        let _ = state.jump_to_query(report, &search_query);
+                        last_search_at = Some(Instant::now());
+                    }
+                    KeyCode::Enter => {
+                        if let Some(sound) = state.activate_selected(report) {
+                            if let Some(client) = &preview_client {
+                                preview_status = preview_sound(client, sound);
+                            }
+                        }
+                    }
+                    KeyCode::Char(ch)
+                        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-') =>
+                    {
+                        let now = Instant::now();
+                        if last_search_at
+                            .is_none_or(|last| now.saturating_duration_since(last) > Duration::from_millis(1200))
+                        {
+                            search_query.clear();
+                        }
+                        search_query.push(ch.to_ascii_lowercase());
+                        let _ = state.jump_to_query(report, &search_query);
+                        last_search_at = Some(now);
+                    }
+                    _ => {}
+                }
+            }
+            Event::Mouse(mouse)
+                if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) =>
+            {
+                let size = terminal.size().map_err(|error| error.to_string())?;
+                if let Some(sound) =
+                    state.handle_click(
+                        report,
+                        ratatui::layout::Rect::new(0, 0, size.width, size.height),
+                        mouse.column,
+                        mouse.row,
+                    )
+                {
+                    search_query.clear();
+                    if let Some(client) = &preview_client {
+                        preview_status = preview_sound(client, sound);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn preview_sound(client: &OscClient, sound: fin::model::SoundTarget) -> String {
+    let label = sound.display_name();
+    let event = ScheduledEvent {
+        layer: fin::model::Symbol(sound.name.clone()),
+        sound,
+        bar_pos: 0.0,
+        beat_pos: 0.0,
+        params: Default::default(),
+    };
+    match client.play_event(&event) {
+        Ok(()) => format!("PREVIEW {label}"),
+        Err(error) => format!("PREVIEW FAILED ({error})"),
+    }
 }
 
 fn draw_dashboard(
@@ -440,7 +581,7 @@ fn draw_dashboard(
 fn setup_terminal() -> io::Result<Terminal<CrosstermBackend<std::io::Stdout>>> {
     enable_raw_mode()?;
     let mut stdout = stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     Terminal::new(backend)
 }
@@ -516,7 +657,7 @@ struct TerminalRestore;
 impl Drop for TerminalRestore {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(stdout(), LeaveAlternateScreen);
+        let _ = execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture);
     }
 }
 

@@ -4,5 +4,6 @@ pub mod osc;
 pub mod parser;
 pub mod scheduler;
 pub mod sounds;
+pub mod sounds_tui;
 pub mod supercollider;
 pub mod watcher;
