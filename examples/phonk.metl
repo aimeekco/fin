@@ -1,0 +1,31 @@
+bpm = 120
+
+[superchip] .sustain 1 .gain 1.005
+    [bar1] <ab2>
+    [bar2] <c3>
+    [bar3] <ab2>
+    [bar4] <c3 _ _ g2> .sustain 0.75
+
+[supersaw] .sustain 1 .gain 1.005
+    [bar1] <ab2>
+    [bar2] <c3>
+    [bar3] <ab2>
+    [bar4] <c3 _ _ g2> .sustain 0.75
+
+[supersaw] 
+    [bar1] <c5 eb5 c5 f5 c5 d5 c5 eb5>
+    [bar2] <c5 eb5 c5 f5 c5 d5 c5 g5>
+    [bar3] <c5 eb5 c5 f5 c5 d5 c5 eb5>
+    [bar4] <c5 eb5 c5 f5 c5 d5 c5 g5>
+
+[cb] .gain 1.06
+    [bar1] <ab3 _ _ ab3 _ _ ab3 _ _ _ g3 _ g3 _ _ _>
+    [bar2] <c4 _ _ c4 _ _ c4 _ _ _ c4 _ _ _ g3 _>
+    [bar3] <ab3 _ _ ab3 _ _ ab3 _ _ _ g3 _ g3 _ _ _>
+    [bar4] <c4 _ _ c4 _ _ c4 _ _ _ c4 _ _ _ g3 _>
+
+[808bd:1] .gain 1.2
+    [default] /4
+
+[bassdm] .gain 1.1
+    [default] /2

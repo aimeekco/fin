@@ -44,9 +44,6 @@ bars = 32
 [supersnare] .gain 0.8
     [default] /16 <_ _ _ _ 0 _ _ 0 _ _ _ _ 0 _ _ 0>
 
-[ht] .gain 1.05
+[bassdm:5] .gain 1.05
     [bar%4] /8 <0 0 _ _ _ _ _ _>
     [bar%2] /8 <0 _ _ _ _ _ _ _>
-
-[bd] .gain 1.1
-    [default] 

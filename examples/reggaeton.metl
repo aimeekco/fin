@@ -1,0 +1,22 @@
+bpm = 100
+bars = 2 
+
+[bassdm:4]
+    [default] /4
+
+[db:11]
+    [default] <_ _ _ 0 _ _ 0 _ _ _ _ 0 _ _ 0 _>
+
+[superpwm] .sustain 0.25
+    [bar1] <a3 _ _ a3 _ _ e4 _ c4 _ _ c4 _ _ e4 _>
+    [bar2] <b3 _ _ b3 _ _ c4 _ b3 _ c4 _ b3 _ g3 _>
+
+[supersquare] .sustain 0.75 .gain 0.7
+    [bar1] <a3>
+    [bar2] <g3 _ _ e3>
+
+[superclap]
+    [default] /4 >> 0.25
+
+
+
