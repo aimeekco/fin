@@ -7,10 +7,11 @@ METL is a layer-based live-coding language with a global phrase length and per-l
 The current parser supports:
 
 - `bpm = <number>`
+- `bpm [intro] = <number>`, `bpm [intro2] = <number>`, `bpm [barN] = <number>`, and `bpm [bar%N] = <number>`
 - `bars = <positive integer>` with a default of `4`
 - layer headers like `[bd]` and `[sd:2]`
 - optional layer-wide effect params: `.gain`, `.pan`, `.speed`, `.sustain`
-- indented one-time intro entries like `[intro]`
+- indented one-time intro entries like `[intro]`, `[intro2]`, ...
 - indented per-layer fallback entries like `[default]`
 - indented periodic entries like `[bar%4]`
 - indented per-bar entries like `[bar1]`
@@ -50,10 +51,17 @@ Top-level assignments:
 
 ```ini
 bpm = 128
+bpm [intro] = 96
+bpm [bar2] = 140
 bars = 4
 ```
 
 - `bpm` defaults to `120` when omitted
+- `bpm = ...` sets the base tempo for the whole file
+- scoped `bpm [...] = ...` lines override the tempo for matching intro bars or loop bars
+- tempo selector precedence matches bar selection precedence: exact `[barN]` beats periodic `[bar%N]`
+- intro tempo selectors must be contiguous when numbered: `[intro]`, `[intro2]`, `[intro3]`, ...
+- use bare `bpm = ...` for the default tempo; `bpm [default] = ...` is not supported
 - `bars` defaults to `4` when omitted
 
 Layers are declared first, then given one or more indented bar definitions:
@@ -61,6 +69,7 @@ Layers are declared first, then given one or more indented bar definitions:
 ```ini
 [bd]
   [intro] /1 <7>
+  [intro2] /1 <3 5>
   [default] /4 <0 3 5 7>
   [bar%4] /8 <0 7 0 7 0 7 0 7>
   [bar2] /2 <0 5>
@@ -68,18 +77,20 @@ Layers are declared first, then given one or more indented bar definitions:
 
 - `[bd]` declares the layer and its default sound target
 - `[intro]` plays once before `bar1` on the first pass, then never loops
+- `[intro2]`, `[intro3]`, ... play once in ascending order after `[intro]` and before `bar1`
 - `[default]` plays on every bar unless a more specific bar selector exists
 - `[bar%N]` plays on bars divisible by `N`, so `[bar%4]` applies on bars `4, 8, 12, ...`
 - `[barN]` defines the pattern for that specific bar in the phrase
-- startup order is `[intro]` once, then the loop begins at `bar1`
+- startup order is `[intro]`, `[intro2]`, ..., then the loop begins at `bar1`
 - loop precedence after the intro is `[barN]` > `[bar%N]` > `[default]`
 - if multiple periodic selectors match, the largest `N` wins
-- if a layer has no matching `[intro]`, `[barN]`, `[bar%N]`, or `[default]`, that layer is silent on that bar
+- intro numbering must be contiguous per layer: `[intro]`, `[intro2]`, `[intro3]`, ...
+- if a layer has no matching intro bar for a given startup step, or no matching `[barN]`, `[bar%N]`, or `[default]` during the loop, that layer is silent on that bar
 - after the last bar, the phrase loops back to `bar1`
 
 ## Pattern Forms
 
-Patterns live on the `[intro]`, `[default]`, `[bar%N]`, or `[barN]` line.
+Patterns live on the `[intro]`, `[introN]`, `[default]`, `[bar%N]`, or `[barN]` line.
 
 Atom patterns:
 
@@ -121,7 +132,7 @@ Sequence semantics:
 
 ## Timing Operators
 
-Timing operators are bar-local. They belong on `[intro]`, `[default]`, `[bar%N]`, or `[barN]`, not on the layer header.
+Timing operators are bar-local. They belong on `[intro]`, `[introN]`, `[default]`, `[bar%N]`, or `[barN]`, not on the layer header.
 
 ```ini
 [bd]

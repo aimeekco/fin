@@ -178,8 +178,7 @@ fn run_infers_density_for_atom_sequence_body() {
 #[test]
 fn run_prints_group_pattern_body() {
     let path = temp_file_path("metl");
-    fs::write(&path, "bpm = 120\n[drum]\n  [bar1] /1 [bd sd:2]\n")
-        .expect("should write test file");
+    fs::write(&path, "bpm = 120\n[drum]\n  [bar1] /1 [bd sd:2]\n").expect("should write test file");
 
     let output = Command::new(env!("CARGO_BIN_EXE_fin"))
         .arg("run")
@@ -221,8 +220,11 @@ fn run_accepts_default_bar_definition() {
 #[test]
 fn run_plays_intro_before_initial_bar() {
     let path = temp_file_path("metl");
-    fs::write(&path, "bpm = 120\nbars = 4\n[bd]\n  [intro] /1 <8>\n  [bar1] /1 <1>\n")
-        .expect("should write test file");
+    fs::write(
+        &path,
+        "bpm = 120\nbars = 4\n[bd]\n  [intro] /1 <8>\n  [bar1] /1 <1>\n",
+    )
+    .expect("should write test file");
 
     let output = Command::new(env!("CARGO_BIN_EXE_fin"))
         .arg("run")
@@ -237,6 +239,56 @@ fn run_plays_intro_before_initial_bar() {
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
         "bpm=120\nbars=4\nbd:8  beat=0.000  bar=0.000\nbpm=120\nbars=4\nbd:1  beat=0.000  bar=0.000\n"
+    );
+}
+
+#[test]
+fn run_prints_active_bpm_for_intro_and_loop_bar() {
+    let path = temp_file_path("metl");
+    fs::write(
+        &path,
+        "bpm = 120\nbpm [intro] = 90\nbpm [bar1] = 140\nbars = 4\n[bd]\n  [intro] /1 <8>\n  [bar1] /1 <1>\n",
+    )
+    .expect("should write test file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fin"))
+        .arg("run")
+        .arg("--no-play")
+        .arg(&path)
+        .output()
+        .expect("command should run");
+
+    fs::remove_file(&path).expect("should clean up temp file");
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "bpm=90\nbars=4\nbd:8  beat=0.000  bar=0.000\nbpm=140\nbars=4\nbd:1  beat=0.000  bar=0.000\n"
+    );
+}
+
+#[test]
+fn run_plays_numbered_intro_bars_in_order_before_initial_bar() {
+    let path = temp_file_path("metl");
+    fs::write(
+        &path,
+        "bpm = 120\nbars = 4\n[bd]\n  [intro] /1 <8>\n  [intro2] /1 <9>\n  [bar1] /1 <1>\n",
+    )
+    .expect("should write test file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fin"))
+        .arg("run")
+        .arg("--no-play")
+        .arg(&path)
+        .output()
+        .expect("command should run");
+
+    fs::remove_file(&path).expect("should clean up temp file");
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "bpm=120\nbars=4\nbd:8  beat=0.000  bar=0.000\nbpm=120\nbars=4\nbd:9  beat=0.000  bar=0.000\nbpm=120\nbars=4\nbd:1  beat=0.000  bar=0.000\n"
     );
 }
 
@@ -304,7 +356,8 @@ fn watch_reloads_on_bar_boundary() {
         .expect("should read watch header");
     assert!(first_line.contains("watch load"));
 
-    fs::write(&path, "bpm = 1200\nbars = 1\n[sd]\n  [bar1] /1\n").expect("should rewrite test file");
+    fs::write(&path, "bpm = 1200\nbars = 1\n[sd]\n  [bar1] /1\n")
+        .expect("should rewrite test file");
     thread::sleep(Duration::from_millis(150));
 
     let mut remainder = String::new();

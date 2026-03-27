@@ -154,17 +154,17 @@ fn run_file(path: PathBuf, host: String, port: u16, no_play: bool) -> Result<(),
     let intro = render_intro(&loaded.program)?;
     let rendered = render_bar(&loaded.program, 0)?;
 
-    if let Some(intro) = &intro {
-        print_schedule(&intro.output);
+    for rendered_intro in &intro {
+        print_schedule(&rendered_intro.output);
     }
     print_schedule(&rendered.output);
 
     if !no_play {
         let client = OscClient::connect(&host, port).map_err(|error| error.to_string())?;
-        if let Some(intro) = &intro {
-            play_rendered_bar(&client, &loaded.program, intro).map_err(|error| error.to_string())?;
+        for rendered_intro in &intro {
+            play_rendered_bar(&client, rendered_intro).map_err(|error| error.to_string())?;
         }
-        play_rendered_bar(&client, &loaded.program, &rendered).map_err(|error| error.to_string())?;
+        play_rendered_bar(&client, &rendered).map_err(|error| error.to_string())?;
     }
 
     Ok(())
@@ -189,8 +189,8 @@ fn watch_file(
     let intro = render_intro(&loaded.program)?;
 
     println!("watch load {}", path.display());
-    if let Some(intro) = &intro {
-        print_schedule(&intro.output);
+    for rendered_intro in &intro {
+        print_schedule(&rendered_intro.output);
     }
     print_schedule(&render_bar(&loaded.program, 0)?.output);
 
@@ -198,11 +198,11 @@ fn watch_file(
         return Ok(());
     }
 
-    if let Some(intro) = &intro {
+    for rendered_intro in &intro {
         if let Some(client) = &client {
-            play_rendered_bar(client, &loaded.program, intro).map_err(|error| error.to_string())?;
+            play_rendered_bar(client, rendered_intro).map_err(|error| error.to_string())?;
         } else {
-            thread::sleep(bar_duration(&loaded.program, Meter::default()));
+            thread::sleep(bar_duration(rendered_intro.bpm, Meter::default()));
         }
     }
 
@@ -211,14 +211,14 @@ fn watch_file(
         let rendered = render_bar(&loaded.program, completed_bars)?;
         if let Some(client) = &client {
             if rendered.events.is_empty() {
-                thread::sleep(bar_duration(&loaded.program, Meter::default()));
+                thread::sleep(bar_duration(rendered.bpm, Meter::default()));
             } else {
                 client
-                    .play_bar(&loaded.program, &rendered.events)
+                    .play_bar(&rendered.events, rendered.bpm)
                     .map_err(|error| error.to_string())?;
             }
         } else {
-            thread::sleep(bar_duration(&loaded.program, Meter::default()));
+            thread::sleep(bar_duration(rendered.bpm, Meter::default()));
         }
 
         completed_bars += 1;
@@ -292,7 +292,7 @@ fn dashboard_file(
     let mut visual_state = DashboardVisualState::new(&loaded.program);
     let mut pending_reload = false;
 
-    if let Some(intro) = render_intro(&loaded.program)? {
+    for intro in render_intro(&loaded.program)? {
         visual_state.sync_layers(&loaded.program);
         if run_dashboard_bar(
             &mut terminal,
@@ -335,16 +335,16 @@ fn dashboard_file(
                 &rendered,
                 DashboardRuntime {
                     osc_status: osc_status.clone(),
-                watcher_status: watcher_status.clone(),
-                bar_index: completed_bars,
-                bar_progress: 1.0,
-                pending_reload,
-                master_scope: visual_state.master_scope.clone(),
-                master_peak: visual_state.master_peak,
-                layer_visuals: visual_state.layer_visuals(),
-            },
-            &logs,
-        )
+                    watcher_status: watcher_status.clone(),
+                    bar_index: completed_bars,
+                    bar_progress: 1.0,
+                    pending_reload,
+                    master_scope: visual_state.master_scope.clone(),
+                    master_peak: visual_state.master_peak,
+                    layer_visuals: visual_state.layer_visuals(),
+                },
+                &logs,
+            )
             .map_err(|error| error.to_string())?;
             return Ok(());
         }
@@ -420,8 +420,8 @@ fn print_schedule(output: &str) {
     }
 }
 
-fn bar_duration(program: &Program, meter: Meter) -> Duration {
-    let seconds = meter.beats_per_bar as f64 * 60.0 / program.effective_bpm() as f64;
+fn bar_duration(bpm: f32, meter: Meter) -> Duration {
+    let seconds = meter.beats_per_bar as f64 * 60.0 / bpm as f64;
     Duration::from_secs_f64(seconds)
 }
 
@@ -507,13 +507,11 @@ fn browse_sounds(report: &fin::sounds::SoundsReport, host: &str, port: u16) -> R
                             }
                         }
                     }
-                    KeyCode::Char(ch)
-                        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-') =>
-                    {
+                    KeyCode::Char(ch) if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-') => {
                         let now = Instant::now();
-                        if last_search_at
-                            .is_none_or(|last| now.saturating_duration_since(last) > Duration::from_millis(1200))
-                        {
+                        if last_search_at.is_none_or(|last| {
+                            now.saturating_duration_since(last) > Duration::from_millis(1200)
+                        }) {
                             search_query.clear();
                         }
                         search_query.push(ch.to_ascii_lowercase());
@@ -527,14 +525,12 @@ fn browse_sounds(report: &fin::sounds::SoundsReport, host: &str, port: u16) -> R
                 if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) =>
             {
                 let size = terminal.size().map_err(|error| error.to_string())?;
-                if let Some(sound) =
-                    state.handle_click(
-                        report,
-                        ratatui::layout::Rect::new(0, 0, size.width, size.height),
-                        mouse.column,
-                        mouse.row,
-                    )
-                {
+                if let Some(sound) = state.handle_click(
+                    report,
+                    ratatui::layout::Rect::new(0, 0, size.width, size.height),
+                    mouse.column,
+                    mouse.row,
+                ) {
                     search_query.clear();
                     if let Some(client) = &preview_client {
                         preview_status = preview_sound(client, sound);
@@ -570,6 +566,7 @@ fn draw_dashboard(
 ) -> io::Result<()> {
     let state = build_dashboard_state(
         program,
+        rendered.bpm,
         &rendered.events,
         runtime,
         logs.iter().cloned().collect(),
@@ -615,30 +612,29 @@ fn time_stamp() -> String {
 fn render_bar(program: &Program, bar_index: usize) -> Result<RenderedBar, String> {
     let events =
         schedule_bar(program, Meter::default(), bar_index).map_err(|error| error.to_string())?;
-    let output = format_events(program, &events);
-    Ok(RenderedBar { events, output })
+    let bpm = program.bpm_for_bar(bar_index);
+    let output = format_events(program, bpm, &events);
+    Ok(RenderedBar { events, output, bpm })
 }
 
-fn render_intro(program: &Program) -> Result<Option<RenderedBar>, String> {
-    if !program.layers.iter().any(|layer| layer.intro_bar().is_some()) {
-        return Ok(None);
-    }
-
-    let events = schedule_intro(program, Meter::default()).map_err(|error| error.to_string())?;
-    let output = format_events(program, &events);
-    Ok(Some(RenderedBar { events, output }))
+fn render_intro(program: &Program) -> Result<Vec<RenderedBar>, String> {
+    (1..=program.intro_bar_count())
+        .map(|intro_index| {
+            let events = schedule_intro(program, Meter::default(), intro_index)
+                .map_err(|error| error.to_string())?;
+            let bpm = program.bpm_for_intro(intro_index);
+            let output = format_events(program, bpm, &events);
+            Ok(RenderedBar { events, output, bpm })
+        })
+        .collect()
 }
 
-fn play_rendered_bar(
-    client: &OscClient,
-    program: &Program,
-    rendered: &RenderedBar,
-) -> Result<(), fin::osc::OscError> {
+fn play_rendered_bar(client: &OscClient, rendered: &RenderedBar) -> Result<(), fin::osc::OscError> {
     if rendered.events.is_empty() {
-        thread::sleep(bar_duration(program, Meter::default()));
+        thread::sleep(bar_duration(rendered.bpm, Meter::default()));
         Ok(())
     } else {
-        client.play_bar(program, &rendered.events)
+        client.play_bar(&rendered.events, rendered.bpm)
     }
 }
 
@@ -650,6 +646,7 @@ struct LoadedTrack {
 struct RenderedBar {
     events: Vec<ScheduledEvent>,
     output: String,
+    bpm: f32,
 }
 
 struct TerminalRestore;
@@ -674,7 +671,7 @@ fn run_dashboard_bar(
     bar_index: usize,
     logs: &mut VecDeque<String>,
 ) -> Result<bool, String> {
-    let bar_duration = bar_duration(program, Meter::default());
+    let bar_duration = bar_duration(rendered.bpm, Meter::default());
     let bar_start = Instant::now();
     let mut next_frame = bar_start;
     let mut next_event = 0usize;
@@ -685,10 +682,7 @@ fn run_dashboard_bar(
         let progress = (elapsed.as_secs_f32() / bar_duration.as_secs_f32()).clamp(0.0, 1.0);
 
         while next_event < rendered.events.len()
-            && beat_to_duration(
-                rendered.events[next_event].beat_pos,
-                program.effective_bpm(),
-            ) <= elapsed
+            && beat_to_duration(rendered.events[next_event].beat_pos, rendered.bpm) <= elapsed
         {
             let event = &rendered.events[next_event];
             if let Some(client) = client {
@@ -815,7 +809,8 @@ impl DashboardVisualState {
             }
             *per_layer.entry(pulse.layer.clone()).or_default() += level;
             master += level;
-            master_peak = master_peak.max((1.0 - age / (LEVEL_DECAY_SECONDS * 0.5)).clamp(0.0, 1.0) * pulse.gain);
+            master_peak = master_peak
+                .max((1.0 - age / (LEVEL_DECAY_SECONDS * 0.5)).clamp(0.0, 1.0) * pulse.gain);
         }
 
         for layer in &program.layers {
@@ -824,12 +819,7 @@ impl DashboardVisualState {
                 .copied()
                 .unwrap_or(0.0)
                 .clamp(0.0, 1.0);
-            let peak = self
-                .layer_peaks
-                .get(&layer.name.0)
-                .copied()
-                .unwrap_or(0.0)
-                * 0.82;
+            let peak = self.layer_peaks.get(&layer.name.0).copied().unwrap_or(0.0) * 0.82;
             self.layer_peaks
                 .insert(layer.name.0.clone(), peak.max(level));
             let entry = self

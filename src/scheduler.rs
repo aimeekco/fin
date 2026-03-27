@@ -36,8 +36,12 @@ pub fn schedule_bar(
     schedule_selected_bars(program, meter, |layer| layer.bar_for_phrase(phrase_bar))
 }
 
-pub fn schedule_intro(program: &Program, meter: Meter) -> Result<Vec<ScheduledEvent>, ScheduleError> {
-    schedule_selected_bars(program, meter, |layer| layer.intro_bar())
+pub fn schedule_intro(
+    program: &Program,
+    meter: Meter,
+    intro_index: u32,
+) -> Result<Vec<ScheduledEvent>, ScheduleError> {
+    schedule_selected_bars(program, meter, |layer| layer.intro_bar(intro_index))
 }
 
 fn schedule_selected_bars<'a, F>(
@@ -126,10 +130,10 @@ where
     Ok(events)
 }
 
-pub fn format_events(program: &Program, events: &[ScheduledEvent]) -> String {
+pub fn format_events(program: &Program, bpm: f32, events: &[ScheduledEvent]) -> String {
     let mut lines = Vec::new();
 
-    if let Some(bpm) = program.bpm {
+    if program.has_explicit_tempo() {
         if bpm.fract() == 0.0 {
             lines.push(format!("bpm={:.0}", bpm));
         } else {
@@ -169,14 +173,19 @@ fn collect_layer_params(modifiers: &[Modifier]) -> Result<EventParams, ScheduleE
             Modifier::Speed(value) => params.speed = Some(*value),
             Modifier::Sustain(value) => params.sustain = Some(*value),
             Modifier::Divide(_) | Modifier::Multiply(_) | Modifier::Shift(_) => {
-                return Err(ScheduleError::new("rhythmic modifiers are only allowed inside bar entries"));
+                return Err(ScheduleError::new(
+                    "rhythmic modifiers are only allowed inside bar entries",
+                ));
             }
         }
     }
     Ok(params)
 }
 
-fn resolve_pattern_targets(layer: &Layer, bar: &BarPattern) -> Result<Vec<SoundTarget>, ScheduleError> {
+fn resolve_pattern_targets(
+    layer: &Layer,
+    bar: &BarPattern,
+) -> Result<Vec<SoundTarget>, ScheduleError> {
     match &bar.pattern {
         PatternSource::ImplicitSelf => Ok(vec![layer.default_target.clone()]),
         PatternSource::Atom(atom) => Ok(vec![resolve_atom(atom, &layer.default_target)?]),
@@ -307,7 +316,9 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::model::{BarPattern, BarSelector, NoteValue, PatternValue, Program, SoundTarget, Symbol};
+    use crate::model::{
+        BarPattern, BarSelector, NoteValue, PatternValue, Program, SoundTarget, Symbol,
+    };
 
     fn bar(pattern: PatternSource, modifiers: Vec<Modifier>) -> BarPattern {
         BarPattern {
@@ -334,6 +345,7 @@ mod tests {
     fn schedules_atom_sequence_across_bar_slots() {
         let program = Program {
             bpm: Some(128.0),
+            tempo_changes: BTreeMap::new(),
             bars: Some(4),
             layers: vec![layer(
                 "bd",
@@ -364,6 +376,7 @@ mod tests {
     fn infers_slot_count_for_atom_sequence_without_density_modifier() {
         let program = Program {
             bpm: Some(128.0),
+            tempo_changes: BTreeMap::new(),
             bars: Some(4),
             layers: vec![layer(
                 "bd",
@@ -397,6 +410,7 @@ mod tests {
     fn schedules_note_sequence_within_selected_bar() {
         let program = Program {
             bpm: Some(120.0),
+            tempo_changes: BTreeMap::new(),
             bars: Some(4),
             layers: vec![layer(
                 "bass",
@@ -428,6 +442,7 @@ mod tests {
     fn schedules_compact_hit_rest_grid() {
         let program = Program {
             bpm: Some(120.0),
+            tempo_changes: BTreeMap::new(),
             bars: Some(1),
             layers: vec![layer(
                 "bd",
@@ -461,13 +476,17 @@ mod tests {
 
         let events = schedule_bar(&program, Meter::default(), 0).expect("schedule should work");
         let beats: Vec<f32> = events.iter().map(|event| event.beat_pos).collect();
-        assert_eq!(beats, vec![0.705_882_4, 2.588_235_4, 2.823_529_5, 3.764_706]);
+        assert_eq!(
+            beats,
+            vec![0.705_882_4, 2.588_235_4, 2.823_529_5, 3.764_706]
+        );
     }
 
     #[test]
     fn skips_rests_in_note_sequences_without_collapsing_timing() {
         let program = Program {
             bpm: Some(120.0),
+            tempo_changes: BTreeMap::new(),
             bars: Some(1),
             layers: vec![layer(
                 "bass",
@@ -506,6 +525,7 @@ mod tests {
     fn missing_bar_definition_is_silent() {
         let program = Program {
             bpm: Some(128.0),
+            tempo_changes: BTreeMap::new(),
             bars: Some(4),
             layers: vec![layer(
                 "bd",
@@ -524,11 +544,12 @@ mod tests {
     fn intro_bar_definition_applies_only_during_intro_schedule() {
         let program = Program {
             bpm: Some(128.0),
+            tempo_changes: BTreeMap::new(),
             bars: Some(4),
             layers: vec![layer(
                 "bd",
                 &[(
-                    BarSelector::Intro,
+                    BarSelector::Intro(1),
                     bar(
                         PatternSource::Atom(PatternAtom::SampleIndex(8)),
                         vec![Modifier::Divide(1)],
@@ -537,7 +558,7 @@ mod tests {
             )],
         };
 
-        let intro = schedule_intro(&program, Meter::default()).expect("schedule should work");
+        let intro = schedule_intro(&program, Meter::default(), 1).expect("schedule should work");
         let first_bar = schedule_bar(&program, Meter::default(), 0).expect("schedule should work");
         let looped_bar = schedule_bar(&program, Meter::default(), 4).expect("schedule should work");
 
@@ -548,15 +569,50 @@ mod tests {
     }
 
     #[test]
-    fn exact_bar_definition_applies_after_intro_schedule() {
+    fn numbered_intro_bar_definition_applies_only_for_matching_intro_index() {
         let program = Program {
             bpm: Some(128.0),
+            tempo_changes: BTreeMap::new(),
             bars: Some(4),
             layers: vec![layer(
                 "bd",
                 &[
                     (
-                        BarSelector::Intro,
+                        BarSelector::Intro(1),
+                        bar(
+                            PatternSource::Atom(PatternAtom::SampleIndex(8)),
+                            vec![Modifier::Divide(1)],
+                        ),
+                    ),
+                    (
+                        BarSelector::Intro(2),
+                        bar(
+                            PatternSource::Atom(PatternAtom::SampleIndex(9)),
+                            vec![Modifier::Divide(1)],
+                        ),
+                    ),
+                ],
+            )],
+        };
+
+        let intro1 = schedule_intro(&program, Meter::default(), 1).expect("schedule should work");
+        let intro2 = schedule_intro(&program, Meter::default(), 2).expect("schedule should work");
+
+        assert_eq!(intro1[0].sound.display_name(), "bd:8");
+        assert_eq!(intro2[0].sound.display_name(), "bd:9");
+    }
+
+    #[test]
+    fn exact_bar_definition_applies_after_intro_schedule() {
+        let program = Program {
+            bpm: Some(128.0),
+            tempo_changes: BTreeMap::new(),
+            bars: Some(4),
+            layers: vec![layer(
+                "bd",
+                &[
+                    (
+                        BarSelector::Intro(1),
                         bar(
                             PatternSource::Atom(PatternAtom::SampleIndex(8)),
                             vec![Modifier::Divide(1)],
@@ -573,7 +629,7 @@ mod tests {
             )],
         };
 
-        let intro = schedule_intro(&program, Meter::default()).expect("schedule should work");
+        let intro = schedule_intro(&program, Meter::default(), 1).expect("schedule should work");
         let first_bar = schedule_bar(&program, Meter::default(), 0).expect("schedule should work");
         let second_cycle_first_bar =
             schedule_bar(&program, Meter::default(), 4).expect("schedule should work");
@@ -587,6 +643,7 @@ mod tests {
     fn default_bar_definition_applies_when_specific_bar_is_missing() {
         let program = Program {
             bpm: Some(128.0),
+            tempo_changes: BTreeMap::new(),
             bars: Some(4),
             layers: vec![layer(
                 "bd",
@@ -609,6 +666,7 @@ mod tests {
     fn specific_bar_overrides_default_bar_definition() {
         let program = Program {
             bpm: Some(128.0),
+            tempo_changes: BTreeMap::new(),
             bars: Some(4),
             layers: vec![layer(
                 "bd",
@@ -640,6 +698,7 @@ mod tests {
     fn periodic_bar_definition_applies_on_matching_phrase_bars() {
         let program = Program {
             bpm: Some(128.0),
+            tempo_changes: BTreeMap::new(),
             bars: Some(8),
             layers: vec![layer(
                 "bd",
@@ -665,6 +724,7 @@ mod tests {
     fn more_specific_periodic_bar_definition_wins() {
         let program = Program {
             bpm: Some(128.0),
+            tempo_changes: BTreeMap::new(),
             bars: Some(8),
             layers: vec![layer(
                 "bd",
@@ -696,6 +756,7 @@ mod tests {
     fn exact_bar_definition_overrides_periodic_bar_definition() {
         let program = Program {
             bpm: Some(128.0),
+            tempo_changes: BTreeMap::new(),
             bars: Some(8),
             layers: vec![layer(
                 "bd",
@@ -727,6 +788,7 @@ mod tests {
     fn loops_back_to_first_phrase_bar() {
         let program = Program {
             bpm: Some(128.0),
+            tempo_changes: BTreeMap::new(),
             bars: Some(4),
             layers: vec![layer(
                 "bd",
@@ -743,7 +805,8 @@ mod tests {
             )],
         };
 
-        let first_phrase = schedule_bar(&program, Meter::default(), 0).expect("schedule should work");
+        let first_phrase =
+            schedule_bar(&program, Meter::default(), 0).expect("schedule should work");
         let second_phrase =
             schedule_bar(&program, Meter::default(), 4).expect("schedule should work");
 
@@ -763,6 +826,7 @@ mod tests {
         layer.modifiers = vec![Modifier::Gain(0.5), Modifier::Pan(-0.25)];
         let program = Program {
             bpm: Some(128.0),
+            tempo_changes: BTreeMap::new(),
             bars: Some(4),
             layers: vec![layer],
         };

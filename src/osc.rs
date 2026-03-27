@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use rosc::{OscMessage, OscPacket, OscType, encoder};
 
-use crate::model::{EventParams, Program, ScheduledEvent, SoundTarget};
+use crate::model::{EventParams, ScheduledEvent, SoundTarget};
 
 #[derive(Debug)]
 pub struct OscClient {
@@ -46,12 +46,12 @@ impl OscClient {
         Ok(Self { socket, target })
     }
 
-    pub fn play_bar(&self, program: &Program, events: &[ScheduledEvent]) -> Result<(), OscError> {
+    pub fn play_bar(&self, events: &[ScheduledEvent], bpm: f32) -> Result<(), OscError> {
         let start = Instant::now();
-        let bar_duration = beat_to_duration(4.0, program.effective_bpm());
+        let bar_duration = beat_to_duration(4.0, bpm);
 
         for event in events {
-            let target_offset = beat_to_duration(event.beat_pos, program.effective_bpm());
+            let target_offset = beat_to_duration(event.beat_pos, bpm);
             sleep_until(start + target_offset);
             self.play_event(event)?;
         }

@@ -17,10 +17,11 @@ This repo currently supports:
 Implemented METL subset:
 
 - `bpm = <number>`
+- `bpm [intro] = <number>`, `bpm [intro2] = <number>`, `bpm [barN] = <number>`, and `bpm [bar%N] = <number>`
 - `bars = <positive integer>`
 - `[layer]`
 - `[layer:index]`
-- indented `[intro]` entries under a layer for a one-time pre-roll bar before the loop starts
+- indented `[intro]`, `[intro2]`, ... entries under a layer for one-time pre-roll bars before the loop starts
 - indented `[default]` entries under a layer as the per-layer fallback bar
 - indented `[bar%N]` entries under a layer for every `N`th phrase bar
 - indented `[barN]` entries under each layer

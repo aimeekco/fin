@@ -1,0 +1,19 @@
+bpm = 86
+bpm[intro] = 129
+
+[supercomparator]
+    [intro1] <ab4>
+    [intro2] <g4>
+    [intro3] <eb4>
+    [intro4] <f4>
+    [bar1] <e4 a4 e4 a4 e4 a4 e4 a4> .sustain 0.3
+    [bar2] <eb4 a4 eb4 a4 eb4 a4 eb4 a4> .sustain 0.3
+    [bar3] <eb4 gs4 eb4 gs4 eb4 gs4 eb4 gs4> .sustain 0.3
+    [bar4] <db4 gs4 db4 gs4 db4 gs4 db4 gs4> .sustain 0.3
+
+[superpwm]
+    [intro1] <f4 f4 ab4 bb4 f4 f4 ab4 bb4>
+    [intro2] <f4 f4 ab4 bb4 f4 f4 ab4 bb4>
+    [intro3] <f4 f4 ab4 bb4 f4 f4 ab4 bb4>
+    [intro4] <f4 f4 ab4 bb4 f4 f4 ab4 bb4>
+    [default] <f4 f4 ab4 bb4 f4 f4 ab4 bb4 f4 f4 ab4 bb4>

@@ -1,0 +1,21 @@
+bpm = 80
+bars = 2
+
+[supercomparator] .sustain 2
+    [bar1] <cs6 g5>
+    [bar2] <c6 f5>
+
+[supersaw] .gain 0.8
+    [bar1] <_ g4 _ cs4 f4 _ cs4 _ _ g4 _ cs4 f4 _ _ _>
+    [bar2] <_ g4 _ c4 f4 _ c4 _ _ g4 _ c4 f4 _ _ _>
+
+
+[ab:7] .gain 1.1
+    [default] <_ 0 0 0 _ 0 0 0 _ 0 0 0 _ 0 0 0>
+
+[bd:12] .gain 1.1
+    [default] /2
+
+[sd] .gain 0.8
+    [bar1] <_ _ 0 _ _ _ 0 _ _ _ 0 _ _ _ 0 _>
+    [bar2] <_ _ 0 _ _ _ 0 _ _ _ 0 _ _ 0 0 0>

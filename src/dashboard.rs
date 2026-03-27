@@ -1,15 +1,15 @@
 use std::collections::BTreeMap;
 
-use ratatui::buffer::Buffer;
 use ratatui::Frame;
+use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Widget};
 
 use crate::model::{
-    BarPattern, BarSelector, Layer, Modifier, NoteValue, PatternAtom, PatternSource,
-    PatternValue, Program, ScheduledEvent,
+    BarPattern, BarSelector, Layer, Modifier, NoteValue, PatternAtom, PatternSource, PatternValue,
+    Program, ScheduledEvent,
 };
 use crate::osc::event_gain;
 
@@ -81,6 +81,7 @@ pub struct BottomArt {
 
 pub fn build_dashboard_state(
     program: &Program,
+    bpm: f32,
     events: &[ScheduledEvent],
     runtime: DashboardRuntime,
     logs: Vec<String>,
@@ -98,13 +99,18 @@ pub fn build_dashboard_state(
         } else {
             "RUNNING".to_string()
         },
-        bpm: format_bpm(program),
+        bpm: format_bpm(bpm),
         clip_percent,
         osc_status: runtime.osc_status,
         watcher_status: runtime.watcher_status,
         master_scope: runtime.master_scope,
         master_peak: runtime.master_peak,
-        transport: build_transport_row(runtime.bar_index, runtime.bar_progress, runtime.master_peak, events),
+        transport: build_transport_row(
+            runtime.bar_index,
+            runtime.bar_progress,
+            runtime.master_peak,
+            events,
+        ),
         layers: build_layer_rows(program, events, &runtime.layer_visuals),
         bottom_art,
         logs,
@@ -223,7 +229,10 @@ fn render_transport(frame: &mut Frame<'_>, area: Rect, transport: &TransportRow)
         ]),
         Line::from(vec![
             Span::styled("grid ", Style::default().fg(Color::DarkGray)),
-            Span::styled(transport.phase_bar.clone(), Style::default().fg(Color::Blue)),
+            Span::styled(
+                transport.phase_bar.clone(),
+                Style::default().fg(Color::Blue),
+            ),
         ]),
         Line::from(vec![
             Span::styled("head ", Style::default().fg(Color::DarkGray)),
@@ -233,7 +242,10 @@ fn render_transport(frame: &mut Frame<'_>, area: Rect, transport: &TransportRow)
             ),
             Span::raw(" "),
             Span::styled("pulse ", Style::default().fg(Color::DarkGray)),
-            Span::styled(transport.pulse_bar.clone(), Style::default().fg(Color::Yellow)),
+            Span::styled(
+                transport.pulse_bar.clone(),
+                Style::default().fg(Color::Yellow),
+            ),
         ]),
     ];
     frame.render_widget(Paragraph::new(text), inner);
@@ -244,7 +256,11 @@ fn render_master(frame: &mut Frame<'_>, area: Rect, state: &DashboardState) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let energy = energy_bar(MASTER_WIDTH, scope_level(&state.master_scope), state.master_peak);
+    let energy = energy_bar(
+        MASTER_WIDTH,
+        scope_level(&state.master_scope),
+        state.master_peak,
+    );
     let phase = phase_wave(MASTER_WIDTH, state.transport.hits, state.master_peak);
     let text = vec![
         Line::from(vec![
@@ -511,7 +527,8 @@ impl Widget for RaveArtWidget<'_> {
                 let beam = left_dist.min(right_dist) <= pulse_radius / 3;
                 let halo = left_dist.min(right_dist) <= pulse_radius;
                 let strobe = noise > 0.86 - self.art.peak * 0.22;
-                let lattice = ((dx * 3 + dy * 5 + phase_x) % 11 == 0) || ((dx + dy * 2 + phase_y) % 13 == 0);
+                let lattice =
+                    ((dx * 3 + dy * 5 + phase_x) % 11 == 0) || ((dx + dy * 2 + phase_y) % 13 == 0);
                 let floor = dy > (height * 2) / 3 && noise_b > 0.38 - self.art.density * 0.18;
                 let corona = vertical_dist <= 1 && noise > 0.52;
 
@@ -658,14 +675,9 @@ fn layer_detail(layer: &Layer) -> String {
     if layer.bars.is_empty() {
         parts.push("silent".to_string());
     } else {
-        parts.extend(
-            layer
-                .bars
-                .iter()
-                .map(|(bar_selector, pattern)| {
-                    format!("{} {}", bar_label(bar_selector), bar_pattern_label(pattern))
-                }),
-        );
+        parts.extend(layer.bars.iter().map(|(bar_selector, pattern)| {
+            format!("{} {}", bar_label(bar_selector), bar_pattern_label(pattern))
+        }));
     }
 
     parts.join(" | ")
@@ -733,8 +745,7 @@ fn bar_pattern_label(pattern: &BarPattern) -> String {
     parts.join(" ")
 }
 
-fn format_bpm(program: &Program) -> String {
-    let bpm = program.effective_bpm();
+fn format_bpm(bpm: f32) -> String {
     if bpm.fract() == 0.0 {
         format!("{:.0}", bpm)
     } else {
@@ -764,6 +775,7 @@ mod tests {
     fn builds_layer_rows_with_density_bars() {
         let program = Program {
             bpm: Some(132.0),
+            tempo_changes: BTreeMap::new(),
             bars: Some(4),
             layers: vec![
                 Layer {
@@ -930,7 +942,7 @@ mod tests {
             },
             modifiers: Vec::new(),
             bars: BTreeMap::from([(
-                BarSelector::Intro,
+                BarSelector::Intro(1),
                 bar(PatternSource::ImplicitSelf, vec![Modifier::Divide(4)]),
             )]),
             source_line: 1,
@@ -938,6 +950,26 @@ mod tests {
 
         let detail = layer_detail(&layer);
         assert!(detail.contains("[intro] /4 self"));
+    }
+
+    #[test]
+    fn layer_detail_labels_numbered_intro_bar() {
+        let layer = Layer {
+            name: Symbol("bd".to_string()),
+            default_target: SoundTarget {
+                name: "bd".to_string(),
+                index: None,
+            },
+            modifiers: Vec::new(),
+            bars: BTreeMap::from([(
+                BarSelector::Intro(2),
+                bar(PatternSource::ImplicitSelf, vec![Modifier::Divide(4)]),
+            )]),
+            source_line: 1,
+        };
+
+        let detail = layer_detail(&layer);
+        assert!(detail.contains("[intro2] /4 self"));
     }
 
     #[test]

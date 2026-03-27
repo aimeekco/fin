@@ -13,6 +13,7 @@ impl fmt::Display for Symbol {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
     pub bpm: Option<f32>,
+    pub tempo_changes: BTreeMap<BarSelector, TempoChange>,
     pub bars: Option<u32>,
     pub layers: Vec<Layer>,
 }
@@ -22,9 +23,54 @@ impl Program {
         self.bpm.unwrap_or(120.0)
     }
 
+    pub fn has_explicit_tempo(&self) -> bool {
+        self.bpm.is_some() || !self.tempo_changes.is_empty()
+    }
+
+    pub fn bpm_for_bar(&self, bar_index: usize) -> f32 {
+        let phrase_bar = (bar_index as u32 % self.effective_bars()) + 1;
+        self.tempo_changes
+            .get(&BarSelector::Exact(phrase_bar))
+            .map(|change| change.bpm)
+            .or_else(|| {
+                self.tempo_changes
+                    .iter()
+                    .filter_map(|(selector, change)| match selector {
+                        BarSelector::Every(divisor) if phrase_bar.is_multiple_of(*divisor) => {
+                            Some((divisor, change.bpm))
+                        }
+                        _ => None,
+                    })
+                    .max_by_key(|(divisor, _)| *divisor)
+                    .map(|(_, bpm)| bpm)
+            })
+            .unwrap_or_else(|| self.effective_bpm())
+    }
+
+    pub fn bpm_for_intro(&self, intro_index: u32) -> f32 {
+        self.tempo_changes
+            .get(&BarSelector::Intro(intro_index))
+            .map(|change| change.bpm)
+            .unwrap_or_else(|| self.effective_bpm())
+    }
+
     pub fn effective_bars(&self) -> u32 {
         self.bars.unwrap_or(4)
     }
+
+    pub fn intro_bar_count(&self) -> u32 {
+        self.layers
+            .iter()
+            .map(Layer::intro_bar_count)
+            .max()
+            .unwrap_or(0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TempoChange {
+    pub bpm: f32,
+    pub source_line: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -44,9 +90,7 @@ impl Layer {
                 self.bars
                     .iter()
                     .filter_map(|(selector, pattern)| match selector {
-                        BarSelector::Every(divisor)
-                            if phrase_bar.is_multiple_of(*divisor) =>
-                        {
+                        BarSelector::Every(divisor) if phrase_bar.is_multiple_of(*divisor) => {
                             Some((divisor, pattern))
                         }
                         _ => None,
@@ -57,14 +101,25 @@ impl Layer {
             .or_else(|| self.bars.get(&BarSelector::Default))
     }
 
-    pub fn intro_bar(&self) -> Option<&BarPattern> {
-        self.bars.get(&BarSelector::Intro)
+    pub fn intro_bar(&self, intro_index: u32) -> Option<&BarPattern> {
+        self.bars.get(&BarSelector::Intro(intro_index))
+    }
+
+    pub fn intro_bar_count(&self) -> u32 {
+        self.bars
+            .keys()
+            .filter_map(|selector| match selector {
+                BarSelector::Intro(index) => Some(*index),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BarSelector {
-    Intro,
+    Intro(u32),
     Default,
     Every(u32),
     Exact(u32),
@@ -73,7 +128,8 @@ pub enum BarSelector {
 impl BarSelector {
     pub fn header_label(&self) -> String {
         match self {
-            Self::Intro => "[intro]".to_string(),
+            Self::Intro(1) => "[intro]".to_string(),
+            Self::Intro(value) => format!("[intro{value}]"),
             Self::Default => "[default]".to_string(),
             Self::Every(value) => format!("[bar%{value}]"),
             Self::Exact(value) => format!("[bar{value}]"),
@@ -82,7 +138,8 @@ impl BarSelector {
 
     pub fn detail_label(&self) -> String {
         match self {
-            Self::Intro => "[intro]".to_string(),
+            Self::Intro(1) => "[intro]".to_string(),
+            Self::Intro(value) => format!("[intro{value}]"),
             Self::Default => "[default]".to_string(),
             Self::Every(value) => format!("[bar%{value}]"),
             Self::Exact(value) => format!("bar{value}"),
@@ -190,4 +247,51 @@ pub struct EventParams {
     pub sustain: Option<f32>,
     pub note: Option<f32>,
     pub note_label: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn program_with_tempo_changes(changes: &[(BarSelector, f32)]) -> Program {
+        Program {
+            bpm: Some(120.0),
+            tempo_changes: changes
+                .iter()
+                .cloned()
+                .map(|(selector, bpm)| {
+                    (
+                        selector,
+                        TempoChange {
+                            bpm,
+                            source_line: 1,
+                        },
+                    )
+                })
+                .collect(),
+            bars: Some(4),
+            layers: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn resolves_bar_bpm_with_exact_and_periodic_overrides() {
+        let program = program_with_tempo_changes(&[
+            (BarSelector::Every(2), 90.0),
+            (BarSelector::Exact(4), 140.0),
+        ]);
+
+        assert_eq!(program.bpm_for_bar(0), 120.0);
+        assert_eq!(program.bpm_for_bar(1), 90.0);
+        assert_eq!(program.bpm_for_bar(3), 140.0);
+        assert_eq!(program.bpm_for_bar(4), 120.0);
+    }
+
+    #[test]
+    fn resolves_intro_bpm_without_affecting_loop_bars() {
+        let program = program_with_tempo_changes(&[(BarSelector::Intro(1), 72.0)]);
+
+        assert_eq!(program.bpm_for_intro(1), 72.0);
+        assert_eq!(program.bpm_for_bar(0), 120.0);
+    }
 }

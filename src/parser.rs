@@ -7,14 +7,14 @@ use nom::Parser;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_till1, take_until, take_while1};
 use nom::character::complete::{char, digit1, multispace0, multispace1, one_of, space0};
-use nom::combinator::{all_consuming, map, map_res, recognize, verify};
+use nom::combinator::{all_consuming, map, map_res, opt, recognize, verify};
 use nom::multi::{many0, separated_list1};
 use nom::number::complete::recognize_float;
-use nom::sequence::{delimited, preceded, separated_pair};
+use nom::sequence::{delimited, preceded};
 
 use crate::model::{
-    BarPattern, BarSelector, Layer, Modifier, NoteValue, PatternAtom, PatternSource,
-    PatternValue, Program, SoundTarget, Symbol,
+    BarPattern, BarSelector, Layer, Modifier, NoteValue, PatternAtom, PatternSource, PatternValue,
+    Program, SoundTarget, Symbol, TempoChange,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +33,7 @@ impl Error for ParseError {}
 
 pub fn parse_program(input: &str) -> Result<Program, ParseError> {
     let mut bpm = None;
+    let mut tempo_changes = BTreeMap::new();
     let mut bars = None;
     let mut layers = Vec::new();
     let mut current_layer: Option<Layer> = None;
@@ -45,10 +46,7 @@ pub fn parse_program(input: &str) -> Result<Program, ParseError> {
             continue;
         }
 
-        let indent = trimmed
-            .chars()
-            .take_while(|ch| ch.is_whitespace())
-            .count();
+        let indent = trimmed.chars().take_while(|ch| ch.is_whitespace()).count();
         let line = trimmed.trim_start();
 
         if indent == 0 {
@@ -68,33 +66,64 @@ pub fn parse_program(input: &str) -> Result<Program, ParseError> {
                 continue;
             }
 
-            let (name, value) = parse_assignment_statement(line, line_no)?;
-            match name {
-                "bpm" => {
+            let assignment = parse_assignment_statement(line, line_no)?;
+            match (assignment.name, assignment.selector) {
+                ("bpm", None) => {
                     if bpm.is_some() {
                         return Err(ParseError {
                             line: line_no,
                             message: "duplicate `bpm` assignment".to_string(),
                         });
                     }
-                    bpm = Some(value);
+                    bpm = Some(assignment.value);
                 }
-                "bars" => {
+                ("bpm", Some(BarSelector::Default)) => {
+                    return Err(ParseError {
+                        line: line_no,
+                        message: "`bpm [default]` is not supported; use `bpm = <number>`"
+                            .to_string(),
+                    });
+                }
+                ("bpm", Some(selector)) => {
+                    if tempo_changes.contains_key(&selector) {
+                        return Err(ParseError {
+                            line: line_no,
+                            message: format!(
+                                "duplicate `bpm {}` assignment",
+                                selector.header_label()
+                            ),
+                        });
+                    }
+                    tempo_changes.insert(
+                        selector,
+                        TempoChange {
+                            bpm: assignment.value,
+                            source_line: line_no,
+                        },
+                    );
+                }
+                ("bars", None) => {
                     if bars.is_some() {
                         return Err(ParseError {
                             line: line_no,
                             message: "duplicate `bars` assignment".to_string(),
                         });
                     }
-                    if value.fract() != 0.0 || value <= 0.0 {
+                    if assignment.value.fract() != 0.0 || assignment.value <= 0.0 {
                         return Err(ParseError {
                             line: line_no,
                             message: "`bars` must be a positive integer".to_string(),
                         });
                     }
-                    bars = Some(value as u32);
+                    bars = Some(assignment.value as u32);
                 }
-                other => {
+                ("bars", Some(_)) => {
+                    return Err(ParseError {
+                        line: line_no,
+                        message: "`bars` does not support scoped assignments".to_string(),
+                    });
+                }
+                (other, _) => {
                     return Err(ParseError {
                         line: line_no,
                         message: format!("unsupported assignment `{other}`"),
@@ -107,7 +136,11 @@ pub fn parse_program(input: &str) -> Result<Program, ParseError> {
                 message: "indented content must follow a layer".to_string(),
             })?;
             let (bar_selector, bar_pattern) = parse_bar_statement(line, line_no)?;
-            if layer.bars.insert(bar_selector.clone(), bar_pattern).is_some() {
+            if layer
+                .bars
+                .insert(bar_selector.clone(), bar_pattern)
+                .is_some()
+            {
                 return Err(ParseError {
                     line: line_no,
                     message: format!("duplicate `{}` definition", bar_selector.header_label()),
@@ -120,16 +153,70 @@ pub fn parse_program(input: &str) -> Result<Program, ParseError> {
         layers.push(layer);
     }
 
-    let program = Program { bpm, bars, layers };
+    let program = Program {
+        bpm,
+        tempo_changes,
+        bars,
+        layers,
+    };
     validate_program(&program)?;
     Ok(program)
 }
 
 fn validate_program(program: &Program) -> Result<(), ParseError> {
     let max_bars = program.effective_bars();
+    let mut expected_intro = 1u32;
+    for (selector, change) in &program.tempo_changes {
+        match selector {
+            BarSelector::Intro(intro_index) if *intro_index != expected_intro => {
+                return Err(ParseError {
+                    line: change.source_line,
+                    message: format!(
+                        "missing `{}` before `bpm {}`",
+                        BarSelector::Intro(expected_intro).header_label(),
+                        selector.header_label()
+                    ),
+                });
+            }
+            BarSelector::Intro(_) => {
+                expected_intro += 1;
+            }
+            BarSelector::Exact(bar_index) if *bar_index > max_bars => {
+                return Err(ParseError {
+                    line: change.source_line,
+                    message: format!(
+                        "`bpm [bar{bar_index}]` is out of range for bars={max_bars}"
+                    ),
+                });
+            }
+            BarSelector::Every(value) if *value < 2 => {
+                return Err(ParseError {
+                    line: change.source_line,
+                    message: "`bpm [bar%N]` requires N >= 2".to_string(),
+                });
+            }
+            BarSelector::Default => unreachable!("default tempo selector is rejected during parse"),
+            _ => {}
+        }
+    }
+
     for layer in &program.layers {
+        let mut expected_intro = 1u32;
         for (bar_selector, bar) in &layer.bars {
             match bar_selector {
+                BarSelector::Intro(intro_index) if *intro_index != expected_intro => {
+                    return Err(ParseError {
+                        line: bar.source_line,
+                        message: format!(
+                            "missing `{}` before `{}`",
+                            BarSelector::Intro(expected_intro).header_label(),
+                            bar_selector.header_label()
+                        ),
+                    });
+                }
+                BarSelector::Intro(_) => {
+                    expected_intro += 1;
+                }
                 BarSelector::Exact(bar_index) if *bar_index > max_bars => {
                     return Err(ParseError {
                         line: bar.source_line,
@@ -149,6 +236,12 @@ fn validate_program(program: &Program) -> Result<(), ParseError> {
     Ok(())
 }
 
+struct AssignmentStatement<'a> {
+    name: &'a str,
+    selector: Option<BarSelector>,
+    value: f32,
+}
+
 fn strip_comment(line: &str) -> &str {
     match line.split_once('#') {
         Some((before, _)) => before,
@@ -156,9 +249,13 @@ fn strip_comment(line: &str) -> &str {
     }
 }
 
-fn parse_assignment_statement(line: &str, line_no: usize) -> Result<(&str, f32), ParseError> {
-    let (_, assignment) = all_consuming(separated_pair(
+fn parse_assignment_statement(
+    line: &str,
+    line_no: usize,
+) -> Result<AssignmentStatement<'_>, ParseError> {
+    let (_, (name, selector, _, value)) = all_consuming((
         identifier,
+        opt(preceded(multispace1, bar_header)),
         delimited(space0, char('='), space0),
         float_value,
     ))
@@ -167,19 +264,21 @@ fn parse_assignment_statement(line: &str, line_no: usize) -> Result<(&str, f32),
         line: line_no,
         message: "invalid assignment".to_string(),
     })?;
-    Ok(assignment)
+    Ok(AssignmentStatement {
+        name,
+        selector,
+        value,
+    })
 }
 
 fn parse_layer_statement(line: &str, line_no: usize) -> Result<Layer, ParseError> {
-    let (_, (default_target, modifiers)) = all_consuming((
-        layer_header,
-        many0(preceded(multispace1, layer_modifier)),
-    ))
-    .parse(line)
-    .map_err(|_| ParseError {
-        line: line_no,
-        message: "invalid layer statement".to_string(),
-    })?;
+    let (_, (default_target, modifiers)) =
+        all_consuming((layer_header, many0(preceded(multispace1, layer_modifier))))
+            .parse(line)
+            .map_err(|_| ParseError {
+                line: line_no,
+                message: "invalid layer statement".to_string(),
+            })?;
 
     Ok(Layer {
         name: Symbol(default_target.display_name()),
@@ -194,15 +293,13 @@ fn parse_bar_statement(
     line: &str,
     line_no: usize,
 ) -> Result<(BarSelector, BarPattern), ParseError> {
-    let (_, (bar_selector, items)) = all_consuming((
-        bar_header,
-        many0(preceded(multispace1, bar_item)),
-    ))
-    .parse(line)
-    .map_err(|_| ParseError {
-        line: line_no,
-        message: "invalid bar statement".to_string(),
-    })?;
+    let (_, (bar_selector, items)) =
+        all_consuming((bar_header, many0(preceded(multispace1, bar_item))))
+            .parse(line)
+            .map_err(|_| ParseError {
+                line: line_no,
+                message: "invalid bar statement".to_string(),
+            })?;
 
     let mut pattern = PatternSource::ImplicitSelf;
     let mut pattern_seen = false;
@@ -250,7 +347,11 @@ fn layer_header(input: &str) -> IResult<&str, SoundTarget> {
 
 fn bar_header(input: &str) -> IResult<&str, BarSelector> {
     alt((
-        map(tag("[intro]"), |_| BarSelector::Intro),
+        map(tag("[intro]"), |_| BarSelector::Intro(1)),
+        map(
+            delimited(tag("[intro"), unsigned_value, char(']')),
+            BarSelector::Intro,
+        ),
         map(tag("[default]"), |_| BarSelector::Default),
         map(
             delimited(tag("[bar%"), every_value, char(']')),
@@ -483,9 +584,7 @@ fn is_compact_grid(content: &str) -> bool {
     saw_step
 }
 
-fn parse_sound_target_token(
-    input: &str,
-) -> Result<SoundTarget, nom::Err<nom::error::Error<&str>>> {
+fn parse_sound_target_token(input: &str) -> Result<SoundTarget, nom::Err<nom::error::Error<&str>>> {
     let (name, index) = match input.split_once(':') {
         Some((name, index)) => (name, Some(index)),
         None => (input, None),
@@ -589,6 +688,28 @@ mod tests {
     }
 
     #[test]
+    fn parses_scoped_bpm_assignments() {
+        let program = parse_program("bpm = 120\nbpm [intro] = 90\nbpm [bar2] = 140\n")
+            .expect("parse should succeed");
+
+        assert_eq!(program.bpm, Some(120.0));
+        assert_eq!(
+            program
+                .tempo_changes
+                .get(&BarSelector::Intro(1))
+                .map(|change| change.bpm),
+            Some(90.0)
+        );
+        assert_eq!(
+            program
+                .tempo_changes
+                .get(&BarSelector::Exact(2))
+                .map(|change| change.bpm),
+            Some(140.0)
+        );
+    }
+
+    #[test]
     fn parses_layer_with_effect_modifiers() {
         let program = parse_program("[hh] .gain 0.5 .pan -0.25").expect("parse should succeed");
         assert_eq!(program.layers.len(), 1);
@@ -606,8 +727,8 @@ mod tests {
 
     #[test]
     fn parses_bar_pattern_with_subdivision_and_atom_sequence() {
-        let program = parse_program("bars = 4\n[bd]\n  [bar1] /4 <0 3 5 7>\n")
-            .expect("parse should succeed");
+        let program =
+            parse_program("bars = 4\n[bd]\n  [bar1] /4 <0 3 5 7>\n").expect("parse should succeed");
         let bar = program.layers[0]
             .bars
             .get(&BarSelector::Exact(1))
@@ -641,8 +762,8 @@ mod tests {
 
     #[test]
     fn parses_compact_hit_rest_grid_sequence() {
-        let program =
-            parse_program("[bd]\n  [bar1] /16 <xxxoxxxxxxxooxxxo>\n").expect("parse should succeed");
+        let program = parse_program("[bd]\n  [bar1] /16 <xxxoxxxxxxxooxxxo>\n")
+            .expect("parse should succeed");
         let bar = program.layers[0]
             .bars
             .get(&BarSelector::Exact(1))
@@ -714,8 +835,30 @@ mod tests {
             parse_program("[bd]\n  [intro] /4 <0 3 5 7>\n").expect("parse should succeed");
         let bar = program.layers[0]
             .bars
-            .get(&BarSelector::Intro)
+            .get(&BarSelector::Intro(1))
             .expect("intro bar should exist");
+        assert_eq!(bar.modifiers, vec![Modifier::Divide(4)]);
+    }
+
+    #[test]
+    fn parses_numbered_intro_bar_pattern() {
+        let program =
+            parse_program("[bd]\n  [intro2] /4 <0 3 5 7>\n").expect_err("parse should fail");
+        assert!(
+            program
+                .message
+                .contains("missing `[intro]` before `[intro2]`")
+        );
+    }
+
+    #[test]
+    fn parses_contiguous_numbered_intro_bar_patterns() {
+        let program = parse_program("[bd]\n  [intro] /1 <7>\n  [intro2] /4 <0 3 5 7>\n")
+            .expect("parse should succeed");
+        let bar = program.layers[0]
+            .bars
+            .get(&BarSelector::Intro(2))
+            .expect("intro2 bar should exist");
         assert_eq!(bar.modifiers, vec![Modifier::Divide(4)]);
     }
 
@@ -732,8 +875,7 @@ mod tests {
 
     #[test]
     fn rejects_bar_outside_global_phrase_length() {
-        let error =
-            parse_program("bars = 4\n[bd]\n  [bar5] /1\n").expect_err("parse should fail");
+        let error = parse_program("bars = 4\n[bd]\n  [bar5] /1\n").expect_err("parse should fail");
         assert!(error.message.contains("out of range"));
     }
 
@@ -746,22 +888,33 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_default_definition() {
-        let error = parse_program("[bd]\n  [default] /1\n  [default] /2\n")
-            .expect_err("parse should fail");
+        let error =
+            parse_program("[bd]\n  [default] /1\n  [default] /2\n").expect_err("parse should fail");
         assert!(error.message.contains("[default]"));
     }
 
     #[test]
     fn rejects_duplicate_intro_definition() {
-        let error = parse_program("[bd]\n  [intro] /1\n  [intro] /2\n")
-            .expect_err("parse should fail");
+        let error =
+            parse_program("[bd]\n  [intro] /1\n  [intro] /2\n").expect_err("parse should fail");
         assert!(error.message.contains("[intro]"));
     }
 
     #[test]
+    fn rejects_gapped_intro_definition() {
+        let error =
+            parse_program("[bd]\n  [intro] /1\n  [intro3] /2\n").expect_err("parse should fail");
+        assert!(
+            error
+                .message
+                .contains("missing `[intro2]` before `[intro3]`")
+        );
+    }
+
+    #[test]
     fn rejects_duplicate_periodic_definition() {
-        let error = parse_program("[bd]\n  [bar%4] /1\n  [bar%4] /2\n")
-            .expect_err("parse should fail");
+        let error =
+            parse_program("[bd]\n  [bar%4] /1\n  [bar%4] /2\n").expect_err("parse should fail");
         assert!(error.message.contains("[bar%4]"));
     }
 
@@ -775,5 +928,11 @@ mod tests {
     fn rejects_duplicate_bars_assignment() {
         let error = parse_program("bars = 4\nbars = 8\n").expect_err("parse should fail");
         assert!(error.message.contains("duplicate `bars`"));
+    }
+
+    #[test]
+    fn rejects_bpm_default_assignment() {
+        let error = parse_program("bpm [default] = 140\n").expect_err("parse should fail");
+        assert!(error.message.contains("use `bpm = <number>`"));
     }
 }
