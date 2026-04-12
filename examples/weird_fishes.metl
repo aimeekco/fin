@@ -50,8 +50,7 @@ bars = 32
     [bar18] <e4> .sustain 5
     [bar21] <fs3> .sustain 5
     [bar25] <a3> .sustain 5
-    [bar29] <a3 g3 _ _> .sustain 1
-    [bar30] <g3> .sustain 4
+    [bar29] <g3> .sustain 4
 
 [hh] .gain 1.05
     [intro1] <_>
