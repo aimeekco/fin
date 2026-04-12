@@ -2,7 +2,7 @@ bpm = 148
 bars = 32
 
 [clak] .gain 1.2
-    [intro] /4
+    [intro1] /4
 
 [superfm] .sustain 0.3 .gain 0.7
     [bar1] <d5 g4 e4 d5 g4 e4 d5 g4>
@@ -38,12 +38,42 @@ bars = 32
     [bar31] <b4 g4 fs5 b4 g4 fs5 b4 g4>
     [bar32] <fs5 b4 g4 fs5 b4 g4 d5 g4>
 
+[supersquare] .gain 0.7
+    [bar1] <e3 a3 d4 e4> .sustain 0.25
+    [bar2] <e4> .sustain 5
+    [bar5] <fs3> .sustain 5
+    [bar9] <a3> .sustain 5
+    [bar12] <_ _ _ _ _ _ fs3 g3> 
+    [bar13] <g3 g3 e3 e4> .sustain 0.25
+    [bar14] <e4> .sustain 4
+    [bar17] <e3 a3 d4 e4> .sustain 0.25
+    [bar18] <e4> .sustain 5
+    [bar21] <fs3> .sustain 5
+    [bar25] <a3> .sustain 5
+    [bar29] <a3 g3 _ _> .sustain 1
+    [bar30] <g3> .sustain 4
+
 [hh] .gain 1.05
+    [intro1] <_>
+    [intro2] /8
+    [intro3] /8
+    [intro4] /8
+    [intro5] /8
     [default] /8
 
 [supersnare] .gain 0.8
+    [intro1] <_>
+    [intro2] /16 <_ _ _ _ 0 _ _ 0 _ _ _ _ 0 _ _ 0>
+    [intro3] /16 <_ _ _ _ 0 _ _ 0 _ _ _ _ 0 _ _ 0>
+    [intro4] /16 <_ _ _ _ 0 _ _ 0 _ _ _ _ 0 _ _ 0>
+    [intro5] /16 <_ _ _ _ 0 _ _ 0 _ _ _ _ 0 _ _ 0>
     [default] /16 <_ _ _ _ 0 _ _ 0 _ _ _ _ 0 _ _ 0>
 
 [bassdm:5] .gain 1.05
+    [intro1] <_>
+    [intro2] /8 <0 0 _ _ _ _ _ _>
+    [intro3]
+    [intro4] /8 <0 0 _ _ _ _ _ _>
+    [intro5]
     [bar%4] /8 <0 0 _ _ _ _ _ _>
-    [bar%2] /8 <0 _ _ _ _ _ _ _>
+    [bar%2]
